@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic};
 
 enum Error {
     ZeroBitError,
@@ -43,6 +43,7 @@ enum Piece {
 
 #[repr(u64)]
 #[allow(dead_code)]
+#[derive(PartialEq)]
 enum PieceColor {
     WHITE,
     BLACK,
@@ -318,14 +319,14 @@ static mut ROOK_ATTACKS: [[u64; 4096]; 64] = [[0; 4096]; 64];
 
 
 static SQUARE_TO_COORD: [&str; 64] = [
-    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
-    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
-    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
-    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
-    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
-    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
     "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
-    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1"
+    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
+    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
+    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
+    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8"
 ];
 
 // Bishop relevant occupancy bit count for every square on board 
@@ -673,11 +674,13 @@ fn parse_fen(fen: &str, char_pieces: HashMap<char, u32>) {
         fen_ptr += 1;
 
         if fen.chars().nth(fen_ptr).unwrap() != '-' {
-            let file = (fen.chars().nth(fen_ptr).unwrap() as usize - 'a' as usize) as i32;
-            let rank = 8 as i32 - (fen.chars().nth(fen_ptr+1).unwrap() as usize - '0' as usize) as i32;
+            dbg!(fen.chars().nth(fen_ptr).unwrap());
+            dbg!(fen.chars().nth(fen_ptr+1).unwrap());
+            let file = fen.chars().nth(fen_ptr).unwrap() as u8 - 'a' as u8;
+            let rank = (fen.chars().nth(fen_ptr+1).unwrap() as u16 - '0' as u16) - 1;
             dbg!(rank);
             dbg!(file);
-            ENPASSANT = (rank * 8 + file) as u32;
+            ENPASSANT = (rank * 8 + file as u16) as u32;
 
         }else {
             ENPASSANT = BoardSquare::no_sq as u32;
@@ -722,7 +725,7 @@ fn mask_pawn_attacks(square: u64, side: PieceColor) -> BitBoard {
             attacks |= board >> 7;
         }
 
-        if (board & NOT_AB_FILE) != 0 {
+        if (board & NOT_A_FILE) != 0 {
             attacks |= board >> 9;
         }
         
@@ -1110,7 +1113,7 @@ fn get_bishop_attacks(square: u64, mut occupancy: u64)-> BitBoard {
     
 }
 
-
+// get queen attacks
 fn get_rook_attacks(square: u64,mut occupancy: u64) -> BitBoard {
     unsafe {
         occupancy &= ROOK_MASKS[square as usize];
@@ -1118,6 +1121,575 @@ fn get_rook_attacks(square: u64,mut occupancy: u64) -> BitBoard {
         occupancy >>= 64 - ROOK_RELEVANT_BITS[square as usize];
         ROOK_ATTACKS[square as usize][occupancy as usize]
     }  
+}
+
+
+fn get_queen_attacks(square: u64, mut occupancy: u64)-> BitBoard {
+    // init result attacks bitboard
+    let mut queen_attacks: BitBoard = 0;
+
+    // init bishop occupancies
+    let mut bishop_occupancy = occupancy;
+
+    // init rook occupancies
+    let mut rook_occupancy = occupancy;
+
+    
+    unsafe {
+        // get bishop attacks assuming current board occupancy
+        bishop_occupancy &= BISHOP_MASKS[square as usize];
+        bishop_occupancy = bishop_occupancy.wrapping_mul(BISHOP_MAGIC_NUMBERS[square as usize]);
+        bishop_occupancy >>= 64 - BISHOP_RELEVANT_BITS[square as usize];
+
+        // get bishop attacks
+        queen_attacks = BISHOP_ATTACKS[square as usize][bishop_occupancy as usize];
+
+        // get rook attacks assuming current board occupancy
+        rook_occupancy &= ROOK_MASKS[square as usize];
+        rook_occupancy = rook_occupancy.wrapping_mul(ROOK_MAGIC_NUMBERS[square as usize]);
+        rook_occupancy >>= 64 - ROOK_RELEVANT_BITS[square as usize];
+
+        // get rook attacks
+        queen_attacks |= ROOK_ATTACKS[square as usize][rook_occupancy as usize];
+    }
+
+    queen_attacks
+}
+
+// evaluates if given square is attacked by given side
+fn is_square_attacked(square: u64, side: u64) -> bool {
+    unsafe {
+        // attacked by white pawns
+        if (side == PieceColor::WHITE as u64) && (PAWN_ATTACKS[PieceColor::BLACK as usize][square as usize] & PIECE_BITBOARDS[Piece::P as usize] != 0) {
+            return true;
+        }
+
+        // attacked by black pawns
+        if (side == PieceColor::BLACK as u64) && (PAWN_ATTACKS[PieceColor::WHITE as usize][square as usize] & PIECE_BITBOARDS[Piece::p as usize] != 0) {
+            return true;
+        }
+        // attacked by knights
+        let knight_occupancy = match side {
+            0 => PIECE_BITBOARDS[Piece::N as usize],
+            1 => PIECE_BITBOARDS[Piece::n as usize],
+            _ => 0,
+        };
+        if KNIGHT_ATTACKS[square as usize] & knight_occupancy != 0 {
+            return true;
+        }
+
+        // attacked by bishops
+        let bishop_occupancy = match side {
+            0 => PIECE_BITBOARDS[Piece::B as usize],
+            1 => PIECE_BITBOARDS[Piece::b as usize],
+            _ => 0,
+        };
+
+        if get_bishop_attacks(square, OCCUPANCIES[PieceColor::BOTH as usize]) & bishop_occupancy != 0{
+            return true;
+        }
+
+        // attacked by rooks
+        let rook_occupancy = match side {
+            0 => PIECE_BITBOARDS[Piece::R as usize],
+            1 => PIECE_BITBOARDS[Piece::r as usize],
+            _ => 0,
+        };
+
+        if get_rook_attacks(square, OCCUPANCIES[PieceColor::BOTH as usize]) & rook_occupancy != 0{
+            return true;
+        }
+
+        // attacked by queens
+        let queen_occupancy = match side {
+            0 => PIECE_BITBOARDS[Piece::Q as usize],
+            1 => PIECE_BITBOARDS[Piece::q as usize],
+            _ => 0,
+        };
+
+        if get_queen_attacks(square, OCCUPANCIES[PieceColor::BOTH as usize]) & queen_occupancy != 0{
+            return true;
+        }
+
+        // attacked by kings
+        let king_occupancy = match side {
+            0 => PIECE_BITBOARDS[Piece::K as usize],
+            1 => PIECE_BITBOARDS[Piece::k as usize],
+            _ => 0,
+        };
+        if KING_ATTACKS[square as usize] & king_occupancy != 0 {
+            return true;
+        }
+        // by default return false
+        false
+    }
+    
+}
+
+fn print_attacked_squares(side: u64){
+    println!();
+    // Loop over ranks
+    for rank in (0..8).rev() {
+        // Loop over files
+        for file in 0..8 {
+            // Convert file and rank to square number
+            let square: u64 = rank * 8 + file;
+
+            // print file markers
+            if file == 0 {
+                print!(" {}  ", rank+1);
+            }
+            // print bit state (1 or 0)
+            print!(" {} ", is_square_attacked(square, side) as u64);
+        }
+
+        println!();
+    }
+
+    println!("\n     a  b  c  d  e  f  g  h");
+}
+
+
+fn generate_moves() {
+    // define source & target squares
+    let mut source_square = BoardSquare::no_sq as u64;
+    let mut target_square = BoardSquare::no_sq as u64;
+
+    // define current piece's bitboard copy & it's attacks
+    let mut bitboard: BitBoard = 0;
+    let mut attacks = 0;
+
+    for piece in Piece::P as usize .. Piece::k as usize {
+        unsafe {
+            // init piece bitboard copy
+            bitboard = PIECE_BITBOARDS[piece];
+            // generate white pawns & white king castling moves
+            if SIDE == PieceColor::WHITE as i32 {
+                if piece == Piece::P as usize {
+                    while bitboard != 0 {
+                        // init source square
+                        source_square = match index_lsb(bitboard) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // init target square
+                        target_square = source_square + 8;
+
+                        // generate quiet pawn moves
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
+                            // pawn promotion
+                            if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
+                                println!("pawn promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else{
+                                // one square ahead pawn move
+                                println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                // two squares ahead pawn move
+                                if (source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square + 8) == 0 {
+                                    println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize + 8]);
+                                }
+                            }
+                        }
+
+                        // init pawn attacks bitboard
+                        attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & OCCUPANCIES[PieceColor::BLACK as usize]; 
+
+                        // generate pawn captures
+
+                        while attacks != 0 {
+                            // init target square 
+                            target_square = match index_lsb(attacks) {
+                                Ok(val) => val as u64,
+                                Err(_) => panic!(),
+                            };
+
+                            if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
+                                println!("pawn capture promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else{
+                                // one square ahead pawn move
+                                println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                            }
+
+                            reset_bit!(attacks, target_square);
+
+                            // generate enpassant captures
+                            if ENPASSANT != BoardSquare::no_sq as u32 {
+                                let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
+                                // make sure enpassant capture available
+                                if enpassant_attacks != 0 {
+                                    // init enpassant capture target square
+                                    let target_enpassant = match index_lsb(enpassant_attacks) {
+                                        Ok(val) => val as u64,
+                                        Err(_) => panic!()
+                                    };
+
+                                    println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+                                }
+                            }
+                        }
+
+                        reset_bit!(bitboard, source_square);
+                    }
+                // castling moves
+                }else if piece == Piece::K as usize {
+                    // king side castling is available
+                    if CASTLE & Castle::wk as u32 != 0  {
+                        // make sure square between king and king's rook are empty
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g1 as u64) == 0 {
+                            // make sure king and the f1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::f1 as u64, PieceColor::BLACK as u64) {
+                                println!("castling move: e1g1");
+                            }
+                        }
+                    }
+                    // queen side castling is available
+                    if CASTLE & Castle::wq as u32 != 0 {
+                        // make sure square between king and queen's rook are empty
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b1 as u64) == 0 {
+                            // make sure king and the d1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::d1 as u64, PieceColor::BLACK as u64) {
+                                println!("castling move: e1c1");
+                            }
+                        }
+                    } 
+                }
+
+            // generate black pawns & black king castling moves
+            }else {
+                if piece == Piece::p as usize {
+                    while bitboard != 0 {
+                        // init source square
+                        source_square = match index_lsb(bitboard) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // init target square
+                        target_square = source_square - 8;
+
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
+
+                            if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
+                                println!("pawn promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else{
+                                // one square ahead pawn move
+                                println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                // two squares ahead pawn move
+                                if (source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square - 8) == 0 {
+                                    println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize - 8]);
+                                }
+                            }
+                        }
+
+                        attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & OCCUPANCIES[PieceColor::WHITE as usize]; 
+
+                        // generate pawn captures
+
+                        while attacks != 0 {
+                            // init target square 
+                            target_square = match index_lsb(attacks) {
+                                Ok(val) => val as u64,
+                                Err(_) => panic!(),
+                            };
+
+                            if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
+                                println!("pawn capture promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                println!("pawn capture promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else{
+                                // one square ahead pawn move
+                                println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                            }
+
+                            reset_bit!(attacks, target_square);
+
+                            // generate enpassant captures
+                            if ENPASSANT != BoardSquare::no_sq as u32 {
+                                let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
+                                // make sure enpassant capture available
+                                if enpassant_attacks != 0 {
+                                    // init enpassant capture target square
+                                    let target_enpassant = match index_lsb(enpassant_attacks) {
+                                        Ok(val) => val as u64,
+                                        Err(_) => panic!()
+                                    };
+
+                                    println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+                                }
+                            }
+                        }
+
+                        reset_bit!(bitboard, source_square);
+                    }
+                }else if piece == Piece::k as usize {
+                    // king side castling is available
+                    if CASTLE & Castle::bk as u32 != 0  {
+                        // make sure square between king and king's rook are empty
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g8 as u64) == 0 {
+                            // make sure king and the f1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::f8 as u64, PieceColor::WHITE as u64) {
+                                println!("castling move: e8g8");
+                            }
+                        }
+                    }
+                    // queen side castling is available
+                    if CASTLE & Castle::bq as u32 != 0 {
+                        // make sure square between king and queen's rook are empty
+                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b8 as u64) == 0 {
+                            // make sure king and the d1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::d8 as u64, PieceColor::WHITE as u64) {
+                                println!("castling move: e8c8");
+                            }
+                        }
+                    } 
+                }
+
+            }
+            // genarate knight moves
+            if (SIDE == PieceColor::WHITE as i32 && piece == Piece::N as usize) || (SIDE == PieceColor::BLACK as i32 && piece == Piece::n as usize) {
+                // loop over source squares of piece bitboard copy
+                while bitboard != 0 {
+                    // init source square
+                    source_square = match index_lsb(bitboard) {
+                        Ok(val) => val as u64,
+                        Err(_) => panic!(),
+                    };
+
+                    // init piece attacks in order to get set of target squares
+                    if SIDE == PieceColor::WHITE as i32 {
+                        attacks = KNIGHT_ATTACKS[source_square as usize] & !OCCUPANCIES[PieceColor::WHITE as usize];
+                    }else {
+                        attacks = KNIGHT_ATTACKS[source_square as usize] & !OCCUPANCIES[PieceColor::BLACK as usize];
+                    }
+
+                    // loop over target squares available from generated attacks
+                    while attacks != 0 {
+                        // init target square
+                        target_square = match index_lsb(attacks) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // quiet move
+                        if SIDE == PieceColor::WHITE as i32 {
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }else {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }
+
+                        reset_bit!(attacks, target_square);
+                    }
+
+                    reset_bit!(bitboard, source_square);
+                }
+            }
+
+            // generate bishop moves
+            if (SIDE == PieceColor::WHITE as i32 && piece == Piece::B as usize) || (SIDE == PieceColor::BLACK as i32 && piece == Piece::b as usize) {
+                // loop over source squares of piece bitboard copy
+                while bitboard != 0 {
+                    // init source square
+                    source_square = match index_lsb(bitboard) {
+                        Ok(val) => val as u64,
+                        Err(_) => panic!(),
+                    };
+                    // init piece attacks in order to get set of target squares
+                    if SIDE == PieceColor::WHITE as i32 {
+                        attacks = get_bishop_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::WHITE as usize];
+                    }else {
+                        attacks = get_bishop_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::BLACK as usize];
+                    }
+
+                    while attacks != 0 {
+                        // init target square
+                        target_square = match index_lsb(attacks) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // quiet move
+                        if SIDE == PieceColor::WHITE as i32 {
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }else {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }
+
+                        reset_bit!(attacks, target_square);
+                    }
+
+                    reset_bit!(bitboard, source_square);
+                }
+            }
+
+            // generate rook moves
+            if (SIDE == PieceColor::WHITE as i32 && piece == Piece::R as usize) || (SIDE == PieceColor::BLACK as i32 && piece == Piece::r as usize) {
+                // loop over source squares of piece bitboard copy
+                while bitboard != 0 {
+                    // init source square
+                    source_square = match index_lsb(bitboard) {
+                        Ok(val) => val as u64,
+                        Err(_) => panic!(),
+                    };
+                    // init piece attacks in order to get set of target squares
+                    if SIDE == PieceColor::WHITE as i32 {
+                        attacks = get_rook_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::WHITE as usize];
+                    }else {
+                        attacks = get_rook_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::BLACK as usize];
+                    }
+
+                    while attacks != 0 {
+                        // init target square
+                        target_square = match index_lsb(attacks) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // quiet move
+                        if SIDE == PieceColor::WHITE as i32 {
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }else {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }
+
+                        reset_bit!(attacks, target_square);
+                    }
+
+                    reset_bit!(bitboard, source_square);
+                }
+            }
+
+            // generate queen moves
+            if (SIDE == PieceColor::WHITE as i32 && piece == Piece::Q as usize) || (SIDE == PieceColor::BLACK as i32 && piece == Piece::q as usize) {
+                // loop over source squares of piece bitboard copy
+                while bitboard != 0 {
+                    // init source square
+                    source_square = match index_lsb(bitboard) {
+                        Ok(val) => val as u64,
+                        Err(_) => panic!(),
+                    };
+                    // init piece attacks in order to get set of target squares
+                    if SIDE == PieceColor::WHITE as i32 {
+                        attacks = get_queen_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::WHITE as usize];
+                    }else {
+                        attacks = get_queen_attacks(source_square, OCCUPANCIES[PieceColor::BOTH as usize]) & !OCCUPANCIES[PieceColor::BLACK as usize];
+                    }
+    
+                    while attacks != 0 {
+                        // init target square
+                        target_square = match index_lsb(attacks) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+    
+                        // quiet move
+                        if SIDE == PieceColor::WHITE as i32 {
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }else {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }
+    
+                        reset_bit!(attacks, target_square);
+                    }
+    
+                    reset_bit!(bitboard, source_square);
+                }
+            }
+
+            // generate king moves
+            if (SIDE == PieceColor::WHITE as i32 && piece == Piece::K as usize) || (SIDE == PieceColor::BLACK as i32 && piece == Piece::k as usize) {
+                // loop over source squares of piece bitboard copy
+                while bitboard != 0 {
+                    // init source square
+                    source_square = match index_lsb(bitboard) {
+                        Ok(val) => val as u64,
+                        Err(_) => panic!(),
+                    };
+
+                    // init piece attacks in order to get set of target squares
+                    if SIDE == PieceColor::WHITE as i32 {
+                        attacks = KING_ATTACKS[source_square as usize] & !OCCUPANCIES[PieceColor::WHITE as usize]
+                    }else {
+                        attacks = KING_ATTACKS[source_square as usize] & !OCCUPANCIES[PieceColor::BLACK as usize]
+                    }
+
+                    // loop over target squares available from generated attacks
+                    while attacks != 0 {
+                        // init target square
+                        target_square = match index_lsb(attacks) {
+                            Ok(val) => val as u64,
+                            Err(_) => panic!(),
+                        };
+
+                        // quiet move
+                        if SIDE == PieceColor::WHITE as i32 {
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }else {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
+                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }else {
+                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            }
+                        }
+
+                        reset_bit!(attacks, target_square);
+                    }
+
+                    reset_bit!(bitboard, source_square);
+                }
+            }
+        }
+
+    }
 }
 
 fn init_char_pieces(map: &mut HashMap<char, u32>) {
@@ -1142,13 +1714,12 @@ fn main() {
 
     init_leaper_table();
 
-    //init_magic_numbers();
-
     init_sliders_table(1);
     init_sliders_table(0);
 
-    parse_fen(CMK_POSITION, char_pieces);
+    parse_fen(TRICKY_POSITION, char_pieces);
     print_board();
-        
+
+    generate_moves();
     
 }
