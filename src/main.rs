@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 
 enum Error {
     ZeroBitError,
