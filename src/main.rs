@@ -1,4 +1,3 @@
-use std::{collections::HashMap, sync::atomic};
 
 enum Error {
     ZeroBitError,
