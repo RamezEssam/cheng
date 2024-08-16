@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 
 enum Error {
@@ -61,6 +62,14 @@ enum Castle {
     bq = 8,
 }
 
+#[repr(u64)]
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
+#[derive(PartialEq)]
+enum MOVE_TYPE {
+    all_moves,
+    only_captures
+}
 
 static ASCII_PIECES: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
@@ -69,17 +78,27 @@ static UNICODE_PIECES: [&str; 12] = ["♟︎", "♞", "♝", "♜", "♛", "♚"
 // piece bitboards
 static mut PIECE_BITBOARDS: [BitBoard; 12] = [0; 12];
 
+static mut PIECE_BITBOARDS_COPY: [BitBoard; 12] = [0; 12];
+
 // occupancy bitboards
 static mut OCCUPANCIES: [BitBoard; 3] = [0; 3];
+
+static mut OCCUPANCIES_COPY: [BitBoard; 3] = [0; 3];
 
 // side to move
 static mut SIDE: i32 = 0;
 
+static mut SIDE_COPY: i32 = 0;
+
 // enpassant square
 static mut ENPASSANT: u32 = BoardSquare::no_sq as u32; 
 
+static mut ENPASSANT_COPY: u32 = BoardSquare::no_sq as u32; 
+
 
 static mut CASTLE: u32 = 0;
+
+static mut CASTLE_COPY: u32 = 0;
 
 
 // FEN dedug positions
@@ -113,12 +132,117 @@ macro_rules! set_bit {
 
 #[macro_export]
 macro_rules! reset_bit {
-    ($bitboard: ident, $square: expr) => {
+    ($bitboard: expr, $square: expr) => {
         if get_bit!($bitboard, ($square as u64)) == 1 {
             $bitboard ^= (1 as u64) << ($square as u64);
         }
     };
 }
+
+/*
+          binary move bits                               hexidecimal constants
+    
+    0000 0000 0000 0000 0011 1111    source square       0x3f
+    0000 0000 0000 1111 1100 0000    target square       0xfc0
+    0000 0000 1111 0000 0000 0000    piece               0xf000
+    0000 1111 0000 0000 0000 0000    promoted piece      0xf0000
+    0001 0000 0000 0000 0000 0000    capture flag        0x100000
+    0010 0000 0000 0000 0000 0000    double push flag    0x200000
+    0100 0000 0000 0000 0000 0000    enpassant flag      0x400000
+    1000 0000 0000 0000 0000 0000    castling flag       0x800000
+*/
+
+// encode move
+#[macro_export]
+macro_rules! encode_move {
+    ($source: expr, $target: expr, $piece: expr, $promoted: expr, $capture: expr, $double: expr, $enpassant: expr, $castling: expr) => {
+        ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+    };
+}
+
+// extract source square
+#[macro_export]
+macro_rules! get_move_source {
+    ($move: expr) => {
+        $move & 0x3f
+    };
+}
+
+// extract target square
+#[macro_export]
+macro_rules! get_move_target {
+    ($move: expr) => {
+        ($move & 0xfc0) >> 6
+    };
+}
+
+// extract piece
+macro_rules! get_move_piece {
+    ($move: expr) => {
+        ($move & 0xf000) >> 12
+    };
+}
+
+// extract promoted piece
+macro_rules! get_move_promoted {
+    ($move: expr) => {
+        ($move & 0xf0000) >> 16
+    };
+}
+
+// extract capture flag
+macro_rules! get_move_capture {
+    ($move: expr) => {
+        $move & 0x100000
+    };
+}
+
+// extract double pawn push flag
+macro_rules! get_move_double {
+    ($move: expr) => {
+        $move & 0x200000
+    };
+}
+
+// extract castling flag
+macro_rules! get_move_enpassant {
+    ($move: expr) => {
+        $move & 0x400000
+    };
+}
+
+// extract enpassant flag
+macro_rules! get_move_castling {
+    ($move: expr) => {
+        $move & 0x800000
+    };
+}
+
+// Boards state macros
+macro_rules! copy_board {
+    () => {
+        unsafe {
+            PIECE_BITBOARDS_COPY = PIECE_BITBOARDS.clone();
+            OCCUPANCIES_COPY = OCCUPANCIES.clone();
+            SIDE_COPY = SIDE;
+            ENPASSANT_COPY = ENPASSANT;
+            CASTLE_COPY = CASTLE;
+        }
+    }; 
+}
+
+macro_rules! take_back {
+    () => {
+        unsafe {
+            PIECE_BITBOARDS = PIECE_BITBOARDS_COPY.clone();
+            OCCUPANCIES = OCCUPANCIES_COPY.clone();
+            SIDE = SIDE_COPY;
+            ENPASSANT = ENPASSANT_COPY;
+            CASTLE = CASTLE_COPY;
+        }
+    }; 
+}
+
 
 // Random numbers
 static mut RANDOM_SEED: u32 = 1804289383;
@@ -352,6 +476,33 @@ static ROOK_RELEVANT_BITS: [u8; 64] = [
 	11, 10, 10, 10, 10, 10, 10, 11,
 	11, 10, 10, 10, 10, 10, 10, 11,
 	12, 11, 11, 11, 11, 11, 11, 12
+];
+
+
+/*
+
+ king & rooks didn't move:     1111 & 1111  =  1111    15
+
+        white king  moved:     1111 & 1100  =  1100    12
+  white king's rook moved:     1111 & 1110  =  1110    14
+ white queen's rook moved:     1111 & 1101  =  1101    13
+     
+         black king moved:     1111 & 0011  =  1011    3
+  black king's rook moved:     1111 & 1011  =  1011    11
+ black queen's rook moved:     1111 & 0111  =  0111    7
+
+*/
+// 7, 15, 15, 15,  3, 15, 15, 11,
+// Castling rights update constants
+static CASTLING_RIGHTS: [u32; 64] = [
+    13, 15, 15, 15, 12, 15, 15, 14,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    7, 15, 15, 15,  3, 15, 15, 11
 ];
 
 
@@ -597,7 +748,7 @@ fn print_board() {
             print!(" -");
         }
 
-        if CASTLE & Castle::bk as u32 != 0 {
+        if CASTLE & Castle::bq as u32 != 0 {
             print!(" q\n");
         }else {
             print!(" -\n");
@@ -609,7 +760,7 @@ fn print_board() {
 }
 
 // parse FEN string
-fn parse_fen(fen: &str, char_pieces: HashMap<char, u32>) {
+fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
     unsafe {
         PIECE_BITBOARDS = [0; 12];
         OCCUPANCIES = [0; 3];
@@ -675,12 +826,8 @@ fn parse_fen(fen: &str, char_pieces: HashMap<char, u32>) {
         fen_ptr += 1;
 
         if fen.chars().nth(fen_ptr).unwrap() != '-' {
-            dbg!(fen.chars().nth(fen_ptr).unwrap());
-            dbg!(fen.chars().nth(fen_ptr+1).unwrap());
             let file = fen.chars().nth(fen_ptr).unwrap() as u8 - 'a' as u8;
             let rank = (fen.chars().nth(fen_ptr+1).unwrap() as u16 - '0' as u16) - 1;
-            dbg!(rank);
-            dbg!(file);
             ENPASSANT = (rank * 8 + file as u16) as u32;
 
         }else {
@@ -1251,7 +1398,9 @@ fn print_attacked_squares(side: u64){
 }
 
 
-fn generate_moves() {
+fn generate_moves() -> Vec<u64>{
+    // defining move list
+    let mut move_list = Vec::<u64>::new();
     // define source & target squares
     let mut source_square = BoardSquare::no_sq as u64;
     let mut target_square = BoardSquare::no_sq as u64;
@@ -1260,7 +1409,7 @@ fn generate_moves() {
     let mut bitboard: BitBoard = 0;
     let mut attacks = 0;
 
-    for piece in Piece::P as usize .. Piece::k as usize {
+    for piece in Piece::P as usize..=(Piece::k as usize) {
         unsafe {
             // init piece bitboard copy
             bitboard = PIECE_BITBOARDS[piece];
@@ -1281,17 +1430,25 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
                             // pawn promotion
                             if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
-                                println!("pawn promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 0, 0, 0, 0));
                             }else{
                                 // one square ahead pawn move
-                                println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
 
                                 // two squares ahead pawn move
                                 if (source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square + 8) == 0 {
-                                    println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize + 8]);
+                                    // println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize + 8]);
+                                    move_list.push(encode_move!(source_square, target_square +8, piece as u64, 0, 0, 1, 0, 0));
                                 }
                             }
                         }
@@ -1309,13 +1466,24 @@ fn generate_moves() {
                             };
 
                             if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
-                                println!("pawn capture promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 1, 0, 0, 0));
                             }else{
                                 // one square ahead pawn move
-                                println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
 
                             }
 
@@ -1332,7 +1500,9 @@ fn generate_moves() {
                                         Err(_) => panic!()
                                     };
 
-                                    println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+                                    // println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+                                    // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 1, 0));
                                 }
                             }
                         }
@@ -1347,7 +1517,8 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g1 as u64) == 0 {
                             // make sure king and the f1 squares are not under attacks
                             if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::f1 as u64, PieceColor::BLACK as u64) {
-                                println!("castling move: e1g1");
+                                // println!("castling move: e1g1");
+                                move_list.push(encode_move!(BoardSquare::e1 as u64, BoardSquare::g1 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
                     }
@@ -1357,7 +1528,8 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b1 as u64) == 0 {
                             // make sure king and the d1 squares are not under attacks
                             if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::d1 as u64, PieceColor::BLACK as u64) {
-                                println!("castling move: e1c1");
+                                //println!("castling move: e1c1");
+                                move_list.push(encode_move!(BoardSquare::e1 as u64, BoardSquare::c1 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
                     } 
@@ -1379,17 +1551,25 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
 
                             if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
-                                println!("pawn promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 0, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 0, 0, 0, 0));
                             }else{
                                 // one square ahead pawn move
-                                println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
 
                                 // two squares ahead pawn move
                                 if (source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square - 8) == 0 {
-                                    println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize - 8]);
+                                    // println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize - 8]);
+                                    move_list.push(encode_move!(source_square, target_square-8, piece as u64, 0, 0, 1, 0, 0));
                                 }
                             }
                         }
@@ -1406,13 +1586,22 @@ fn generate_moves() {
                             };
 
                             if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
-                                println!("pawn capture promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                println!("pawn capture promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 1, 0, 0, 0));
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 1, 0, 0, 0));
                             }else{
                                 // one square ahead pawn move
-                                println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
 
                             }
 
@@ -1429,7 +1618,9 @@ fn generate_moves() {
                                         Err(_) => panic!()
                                     };
 
-                                    println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+                                    // println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
+
+                                    move_list.push(encode_move!(source_square, target_enpassant, piece as u64, 0, 1, 0, 1, 0));
                                 }
                             }
                         }
@@ -1443,7 +1634,8 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g8 as u64) == 0 {
                             // make sure king and the f1 squares are not under attacks
                             if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::f8 as u64, PieceColor::WHITE as u64) {
-                                println!("castling move: e8g8");
+                                // println!("castling move: e8g8");
+                                move_list.push(encode_move!(BoardSquare::e8 as u64, BoardSquare::g8 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
                     }
@@ -1453,7 +1645,8 @@ fn generate_moves() {
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b8 as u64) == 0 {
                             // make sure king and the d1 squares are not under attacks
                             if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::d8 as u64, PieceColor::WHITE as u64) {
-                                println!("castling move: e8c8");
+                                // println!("castling move: e8c8");
+                                move_list.push(encode_move!(BoardSquare::e8 as u64, BoardSquare::c8 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
                     } 
@@ -1488,15 +1681,19 @@ fn generate_moves() {
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }
 
@@ -1533,15 +1730,19 @@ fn generate_moves() {
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }
 
@@ -1578,15 +1779,19 @@ fn generate_moves() {
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }
 
@@ -1623,15 +1828,19 @@ fn generate_moves() {
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }
     
@@ -1670,15 +1879,19 @@ fn generate_moves() {
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                             }
                         }
 
@@ -1691,6 +1904,208 @@ fn generate_moves() {
         }
 
     }
+    move_list
+}
+
+// print move (for UCI purposes)
+fn print_move(ch_move: u64) {
+    
+    println!("notation: {}{}, piece: {}, promoted piece: {}, capture flag: {}, double pawn push: {}, enpassant: {}, castling: {}", 
+    SQUARE_TO_COORD[get_move_source!(ch_move) as usize],
+    SQUARE_TO_COORD[get_move_target!(ch_move) as usize],
+    ASCII_PIECES[get_move_piece!(ch_move) as usize],
+    if get_move_promoted!(ch_move) != 0 {ASCII_PIECES[get_move_promoted!(ch_move) as usize]} else {"-"},
+    if get_move_capture!(ch_move) != 0 {true} else {false},
+    if get_move_double!(ch_move) != 0 {true} else {false},
+    if get_move_enpassant!(ch_move) != 0 {true} else {false},
+    if get_move_castling!(ch_move) != 0 {true} else {false},
+    );
+}
+
+
+fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
+    // Quiet moves
+    unsafe {
+        if move_flag == MOVE_TYPE::all_moves {
+            // Preserve board state
+            copy_board!();
+
+            // Parse move
+            let source_square = get_move_source!(ch_move);
+            let target_square = get_move_target!(ch_move);
+            let piece = get_move_piece!(ch_move);
+            let promoted = get_move_promoted!(ch_move);
+            let capture = get_move_capture!(ch_move);
+            let double_push = get_move_double!(ch_move);
+            let enpassant = get_move_enpassant!(ch_move);
+            let castling = get_move_castling!(ch_move);
+
+            // Move piece
+            reset_bit!(PIECE_BITBOARDS[piece as usize], source_square);
+            set_bit!(PIECE_BITBOARDS[piece as usize], target_square);
+
+            // Handling capture moves
+            if capture != 0 {
+                let mut start_piece:usize = 0;
+                let mut end_piece:usize = 0;
+
+                if SIDE == PieceColor::WHITE as i32 {
+                    start_piece = Piece::p as usize;
+                    end_piece = Piece::k as usize;
+                }else {
+                    start_piece = Piece::P as usize;
+                    end_piece = Piece::K as usize;
+                }
+                // Loop over bitboards opposite to the current side to move
+                for bb_piece in start_piece..=end_piece {
+                    // if there's a piece on the target square
+                    if get_bit!(PIECE_BITBOARDS[bb_piece], target_square) != 0 {
+                        // remove it from corresponding bitboard
+                        reset_bit!(PIECE_BITBOARDS[bb_piece], target_square);
+                        break;
+                    }
+                } 
+            }
+            // handle pawn promotions
+            if promoted != 0 {
+                reset_bit!(PIECE_BITBOARDS[piece as usize], target_square);
+                set_bit!(PIECE_BITBOARDS[promoted as usize], target_square);
+            }
+
+            // handle enpassant captures
+            if enpassant != 0 {
+                // erase the pawn depending on side to move
+                if SIDE == PieceColor::WHITE as i32 {
+                    reset_bit!(PIECE_BITBOARDS[Piece::p as usize], target_square-8);
+                }else {
+                    reset_bit!(PIECE_BITBOARDS[Piece::P as usize], target_square+8);
+                }
+            }
+
+            // Reset enpassant square
+            ENPASSANT = BoardSquare::no_sq as u32;
+
+
+            // handle double pawn push
+            if double_push != 0 {
+                // set enpassant aquare depending on side to move
+                if SIDE == PieceColor::WHITE as i32 {
+                    ENPASSANT = target_square as u32 - 8 ;
+                }else {
+                    ENPASSANT = target_square as u32 + 8 ;
+                }
+            }
+
+            // handle castling moves
+            if castling != 0 {
+                match target_square {
+                    // white castles king side
+                    // BoardSquare::g1 
+                    6  => {
+                        // move H rook
+                        reset_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::h1);
+                        set_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::f1);
+                    },
+
+                    // white castles queen side
+                    // BoardSquare::c1
+                    2 => {
+                        // move A rook
+                        reset_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::a1);
+                        set_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::d1);
+                    },
+
+                    // black castles king side
+                    // BoardSquare::g8
+                    62 => {
+                        // move H rook
+                        reset_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::h8);
+                        set_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::f8);
+                    },
+
+                    // black castles queen side
+                    // BoardSquare::c8
+                    58 => {
+                        // move A rook
+                        reset_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::a8);
+                        set_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::d8);
+                    },
+
+                    _ => {}
+                }
+                
+            }
+
+            // update castling rights
+            CASTLE &=  CASTLING_RIGHTS[source_square as usize];
+            CASTLE &=  CASTLING_RIGHTS[target_square as usize];
+
+            // reset occupancies
+            OCCUPANCIES = [0; 3];
+
+            // loop over white pieces bitboards
+            for bb_piece in Piece::P as usize..=Piece::K as usize {
+                // update white occupancies
+                OCCUPANCIES[PieceColor::WHITE as usize] |= PIECE_BITBOARDS[bb_piece];
+            }
+
+            // loop over black pieces bitboards
+            for bb_piece in Piece::p as usize..=Piece::k as usize {
+                // update white occupancies
+                OCCUPANCIES[PieceColor::BLACK as usize] |= PIECE_BITBOARDS[bb_piece];
+            }
+
+            // update both sides occupancies
+            OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::WHITE as usize];
+            OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::BLACK as usize];
+
+
+            // change side
+            SIDE ^= 1;
+            // make sure that king has not been exposed into a check
+            if SIDE == PieceColor::WHITE as i32 {
+                let square = match index_lsb(PIECE_BITBOARDS[Piece::k as usize]) {
+                    Ok(val) => val as u64,
+                    Err(_) => panic!(),
+                };
+
+                if is_square_attacked(square, SIDE as u64){
+                    // take move back
+                    take_back!();
+                    return false;
+                }else {
+                    return true;
+                }
+            }else {
+                let square = match index_lsb(PIECE_BITBOARDS[Piece::K as usize]) {
+                    Ok(val) => val as u64,
+                    Err(_) => panic!(),
+                };
+
+                if is_square_attacked(square, SIDE as u64){
+                    // take move back
+                    take_back!();
+                    return false;
+                }else {
+                    return true;
+                }
+            }
+
+
+        // Capture moves
+        } else {
+            // Make sure move is the capture
+            if get_move_capture!(ch_move) != 0{
+                make_move(ch_move, MOVE_TYPE::all_moves);
+                return true;
+            // Otherwise the move is not a capture
+            }else {
+                // Don't make it
+                return false;
+            }
+        }
+    }
+    
 }
 
 fn init_char_pieces(map: &mut HashMap<char, u32>) {
@@ -1707,9 +2122,21 @@ fn init_char_pieces(map: &mut HashMap<char, u32>) {
     map.insert('q', 10);
     map.insert('k', 11);
 }
+
+fn get_time_ms() -> u128 {
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time is going backwards");
+    since_the_epoch.as_millis()
+}
+
+
+
 fn main() {
 
     let mut char_pieces: HashMap<char, u32> = HashMap::new();
+
+    
+
 
     init_char_pieces(&mut char_pieces);
 
@@ -1718,9 +2145,32 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    parse_fen(TRICKY_POSITION, char_pieces);
+    
+
+    parse_fen("r3k2r/p1ppRpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1 ", &char_pieces);
+
     print_board();
 
-    generate_moves();
+    let all_moves = generate_moves();
+
+    let start = get_time_ms();
+
+    for ch_move in all_moves.iter() {
+        copy_board!();
+        
+        println!("making move: {}{} -->", SQUARE_TO_COORD[get_move_source!(*ch_move) as usize], SQUARE_TO_COORD[get_move_target!(*ch_move) as usize]);
+        
+        let is_legal_move = make_move(*ch_move, MOVE_TYPE::all_moves);
+      
+        if !is_legal_move {
+            println!("illegal move");
+            continue;
+        }
+
+        print_board();
+        take_back!();
+    }
+    println!("{} ms elapsed", get_time_ms() - start);
     
+
 }
