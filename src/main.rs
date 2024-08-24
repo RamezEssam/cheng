@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 enum Error {
     ZeroBitError,
 }
@@ -99,6 +98,10 @@ static mut ENPASSANT_COPY: u32 = BoardSquare::no_sq as u32;
 static mut CASTLE: u32 = 0;
 
 static mut CASTLE_COPY: u32 = 0;
+
+// nodes
+
+static mut NODES: u128 = 0;
 
 
 // FEN dedug positions
@@ -219,29 +222,26 @@ macro_rules! get_move_castling {
 }
 
 // Boards state macros
-macro_rules! copy_board {
-    () => {
-        unsafe {
-            PIECE_BITBOARDS_COPY = PIECE_BITBOARDS.clone();
-            OCCUPANCIES_COPY = OCCUPANCIES.clone();
-            SIDE_COPY = SIDE;
-            ENPASSANT_COPY = ENPASSANT;
-            CASTLE_COPY = CASTLE;
-        }
-    }; 
-}
+// macro_rules! copy_board {
+//     () => {
+//         let piece_bitboards_copy = PIECE_BITBOARDS;
+//         //piece_bitboards_copy = PIECE_BITBOARDS;
+//         let occupancy_copy = OCCUPANCIES;
+//         let side_copy = SIDE;
+//         let enpassant_copy = ENPASSANT;
+//         let castle_copy = CASTLE;
+//     }; 
+// }
 
-macro_rules! take_back {
-    () => {
-        unsafe {
-            PIECE_BITBOARDS = PIECE_BITBOARDS_COPY.clone();
-            OCCUPANCIES = OCCUPANCIES_COPY.clone();
-            SIDE = SIDE_COPY;
-            ENPASSANT = ENPASSANT_COPY;
-            CASTLE = CASTLE_COPY;
-        }
-    }; 
-}
+// macro_rules! take_back {
+//     () => {
+//         PIECE_BITBOARDS = piece_bitboards_copy;
+//         OCCUPANCIES = occupancy_copy;
+//         SIDE = side_copy;
+//         ENPASSANT = enpassant_copy;
+//         CASTLE = castle_copy;
+//     }; 
+// }
 
 
 // Random numbers
@@ -759,6 +759,28 @@ fn print_board() {
     
 }
 
+fn copy_board() -> ([u64; 12], [u64; 3], i32, u32, u32) {
+    unsafe {
+        let piece_bitboards_copy = PIECE_BITBOARDS;
+        let occupancy_copy = OCCUPANCIES;
+        let side_copy = SIDE;
+        let enpassant_copy = ENPASSANT;
+        let castle_copy = CASTLE;
+
+        return (piece_bitboards_copy, occupancy_copy, side_copy, enpassant_copy, castle_copy)
+    }
+}
+
+fn take_back(piece_bitboards_copy: [u64; 12], occupancy_copy: [u64; 3], side_copy: i32, enpassant_copy: u32, castle_copy: u32) {
+    unsafe {
+        PIECE_BITBOARDS = piece_bitboards_copy;
+        OCCUPANCIES = occupancy_copy;
+        SIDE =side_copy;
+        ENPASSANT = enpassant_copy;
+        CASTLE = castle_copy;
+    }
+}
+
 // parse FEN string
 fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
     unsafe {
@@ -812,10 +834,10 @@ fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
 
         while fen.chars().nth(fen_ptr).unwrap() != ' ' {
             match fen.chars().nth(fen_ptr).unwrap() {
-                'K' => CASTLE |= Castle::wk as u32,
-                'Q' => CASTLE |= Castle::wq as u32,
-                'k' => CASTLE |= Castle::bk as u32,
-                'q' => CASTLE |= Castle::bq as u32,
+                'K' => {CASTLE |= Castle::wk as u32;},
+                'Q' => {CASTLE |= Castle::wq as u32;},
+                'k' => {CASTLE |= Castle::bk as u32;},
+                'q' => {CASTLE |= Castle::bq as u32;},
                 '-' => {},
                 _ => panic!()
 
@@ -1333,10 +1355,10 @@ fn is_square_attacked(square: u64, side: u64) -> bool {
             _ => 0,
         };
 
-        if get_bishop_attacks(square, OCCUPANCIES[PieceColor::BOTH as usize]) & bishop_occupancy != 0{
+        if get_bishop_attacks(square, OCCUPANCIES[PieceColor::BOTH as usize]) & bishop_occupancy != 0 {
             return true;
         }
-
+        
         // attacked by rooks
         let rook_occupancy = match side {
             0 => PIECE_BITBOARDS[Piece::R as usize],
@@ -1412,7 +1434,7 @@ fn generate_moves() -> Vec<u64>{
     for piece in Piece::P as usize..=(Piece::k as usize) {
         unsafe {
             // init piece bitboard copy
-            bitboard = PIECE_BITBOARDS[piece];
+            bitboard = PIECE_BITBOARDS[piece].clone();
             // generate white pawns & white king castling moves
             if SIDE == PieceColor::WHITE as i32 {
                 if piece == Piece::P as usize {
@@ -1427,28 +1449,29 @@ fn generate_moves() -> Vec<u64>{
                         target_square = source_square + 8;
 
                         // generate quiet pawn moves
-                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
+                        if !(target_square < BoardSquare::a1 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
                             // pawn promotion
                             if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
-                                // println!("pawn promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64){
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 0, 0, 0, 0));
+                                }
+                                
                             }else{
                                 // one square ahead pawn move
-                                // println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
 
                                 // two squares ahead pawn move
                                 if (source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square + 8) == 0 {
-                                    // println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize + 8]);
-                                    move_list.push(encode_move!(source_square, target_square +8, piece as u64, 0, 0, 1, 0, 0));
+                                    if !is_piece_pinned_absolute(source_square, target_square+8, SIDE as u64) {
+                                        move_list.push(encode_move!(source_square, target_square +8, piece as u64, 0, 0, 1, 0, 0));
+                                    }
+                                    
                                 }
                             }
                         }
@@ -1466,43 +1489,37 @@ fn generate_moves() -> Vec<u64>{
                             };
 
                             if source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64 {
-                                // println!("pawn capture promotion: {}{}Q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}R", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}B", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}N", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::Q as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::R as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::B as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::N as u64, 1, 0, 0, 0));
+                                }
+                                
                             }else{
                                 // one square ahead pawn move
-                                // println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
 
                             }
 
                             reset_bit!(attacks, target_square);
+                        }
 
-                            // generate enpassant captures
-                            if ENPASSANT != BoardSquare::no_sq as u32 {
-                                let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
-                                // make sure enpassant capture available
-                                if enpassant_attacks != 0 {
-                                    // init enpassant capture target square
-                                    let target_enpassant = match index_lsb(enpassant_attacks) {
-                                        Ok(val) => val as u64,
-                                        Err(_) => panic!()
-                                    };
-
-                                    // println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
-                                    // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
-                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 1, 0));
+                        // generate enpassant captures
+                        if ENPASSANT != BoardSquare::no_sq as u32 {
+                            let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
+                            // make sure enpassant capture available
+                            if enpassant_attacks != 0 {
+                                // init enpassant capture target square
+                                let target_enpassant = match index_lsb(enpassant_attacks) {
+                                    Ok(val) => val as u64,
+                                    Err(_) => panic!()
+                                };
+                                if !is_piece_pinned_absolute(source_square, target_enpassant, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_enpassant, piece as u64, 0, 1, 0, 1, 0));
                                 }
                             }
                         }
@@ -1510,13 +1527,14 @@ fn generate_moves() -> Vec<u64>{
                         reset_bit!(bitboard, source_square);
                     }
                 // castling moves
-                }else if piece == Piece::K as usize {
+                }
+                if piece == Piece::K as usize {
                     // king side castling is available
                     if CASTLE & Castle::wk as u32 != 0  {
                         // make sure square between king and king's rook are empty
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g1 as u64) == 0 {
-                            // make sure king and the f1 squares are not under attacks
-                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::f1 as u64, PieceColor::BLACK as u64) {
+                            // make sure king and the f1 & g1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::f1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::g1 as u64, PieceColor::BLACK as u64) {
                                 // println!("castling move: e1g1");
                                 move_list.push(encode_move!(BoardSquare::e1 as u64, BoardSquare::g1 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
@@ -1526,9 +1544,8 @@ fn generate_moves() -> Vec<u64>{
                     if CASTLE & Castle::wq as u32 != 0 {
                         // make sure square between king and queen's rook are empty
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c1 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b1 as u64) == 0 {
-                            // make sure king and the d1 squares are not under attacks
-                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::d1 as u64, PieceColor::BLACK as u64) {
-                                //println!("castling move: e1c1");
+                            // make sure king and the d1 & c1 squares are not under attacks
+                            if !is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::d1 as u64, PieceColor::BLACK as u64) && !is_square_attacked(BoardSquare::c1 as u64, PieceColor::BLACK as u64) {
                                 move_list.push(encode_move!(BoardSquare::e1 as u64, BoardSquare::c1 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
@@ -1548,28 +1565,29 @@ fn generate_moves() -> Vec<u64>{
                         // init target square
                         target_square = source_square - 8;
 
-                        if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
+                        if !(target_square > BoardSquare::h8 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square) == 0 {
 
                             if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
-                                // println!("pawn promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 0, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 0, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 0, 0, 0, 0));
+                                }
+                                
                             }else{
                                 // one square ahead pawn move
-                                // println!("pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, PieceColor::BLACK as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
 
                                 // two squares ahead pawn move
                                 if (source_square >= BoardSquare::a7 as u64 && source_square <= BoardSquare::h7 as u64) && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], target_square - 8) == 0 {
-                                    // println!("double pawn push: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize - 8]);
-                                    move_list.push(encode_move!(source_square, target_square-8, piece as u64, 0, 0, 1, 0, 0));
+                                    if !is_piece_pinned_absolute(source_square, target_square - 8, SIDE as u64) {
+                                        move_list.push(encode_move!(source_square, target_square-8, piece as u64, 0, 0, 1, 0, 0));
+                                    }
+                                    
                                 }
                             }
                         }
@@ -1586,55 +1604,53 @@ fn generate_moves() -> Vec<u64>{
                             };
 
                             if source_square >= BoardSquare::a2 as u64 && source_square <= BoardSquare::h2 as u64 {
-                                // println!("pawn capture promotion: {}{}q", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}r", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}b", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                // println!("pawn capture promotion: {}{}n", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                // ($source) | ($target << 6) | ($piece << 12) | ($promoted << 16) | ($capture << 20) | ($double << 21) | ($enpassant << 22) | ($castling << 23)
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 1, 0, 0, 0));
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::q as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::r as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::b as u64, 1, 0, 0, 0));
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, Piece::n as u64, 1, 0, 0, 0));
+                                }
+                                
                             }else{
                                 // one square ahead pawn move
-                                // println!("pawn capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
 
                             }
 
                             reset_bit!(attacks, target_square);
+                        }
 
-                            // generate enpassant captures
-                            if ENPASSANT != BoardSquare::no_sq as u32 {
-                                let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
-                                // make sure enpassant capture available
-                                if enpassant_attacks != 0 {
-                                    // init enpassant capture target square
-                                    let target_enpassant = match index_lsb(enpassant_attacks) {
-                                        Ok(val) => val as u64,
-                                        Err(_) => panic!()
-                                    };
+                        // generate enpassant captures
+                        if ENPASSANT != BoardSquare::no_sq as u32 {
+                            let enpassant_attacks = PAWN_ATTACKS[SIDE as usize][source_square as usize] & (1 << ENPASSANT);
+                            // make sure enpassant capture available
+                            if enpassant_attacks != 0 {
+                                // init enpassant capture target square
+                                let target_enpassant = match index_lsb(enpassant_attacks) {
+                                    Ok(val) => val as u64,
+                                    Err(_) => panic!()
+                                };
 
-                                    // println!("pawn enpassant capture: {}{}", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_enpassant as usize]);
-
+                                if !is_piece_pinned_absolute(source_square, target_enpassant, SIDE as u64) {
                                     move_list.push(encode_move!(source_square, target_enpassant, piece as u64, 0, 1, 0, 1, 0));
                                 }
+                                
                             }
                         }
 
                         reset_bit!(bitboard, source_square);
                     }
-                }else if piece == Piece::k as usize {
+                }
+                if piece == Piece::k as usize {
                     // king side castling is available
                     if CASTLE & Castle::bk as u32 != 0  {
                         // make sure square between king and king's rook are empty
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::f8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::g8 as u64) == 0 {
-                            // make sure king and the f1 squares are not under attacks
-                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::f8 as u64, PieceColor::WHITE as u64) {
-                                // println!("castling move: e8g8");
+                            // make sure king and the f8 & g8 squares are not under attack
+                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::f8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::g8 as u64, PieceColor::WHITE as u64) {
                                 move_list.push(encode_move!(BoardSquare::e8 as u64, BoardSquare::g8 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
@@ -1643,9 +1659,8 @@ fn generate_moves() -> Vec<u64>{
                     if CASTLE & Castle::bq as u32 != 0 {
                         // make sure square between king and queen's rook are empty
                         if get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::d8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::c8 as u64) == 0 && get_bit!(OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::b8 as u64) == 0 {
-                            // make sure king and the d1 squares are not under attacks
-                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::d8 as u64, PieceColor::WHITE as u64) {
-                                // println!("castling move: e8c8");
+                            // make sure king and the d8 & c8 squares are not under attack
+                            if !is_square_attacked(BoardSquare::e8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::d8 as u64, PieceColor::WHITE as u64) && !is_square_attacked(BoardSquare::c8 as u64, PieceColor::WHITE as u64) {
                                 move_list.push(encode_move!(BoardSquare::e8 as u64, BoardSquare::c8 as u64, piece as u64, 0, 0, 0, 0, 1));
                             }
                         }
@@ -1681,19 +1696,27 @@ fn generate_moves() -> Vec<u64>{
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }
 
@@ -1730,19 +1753,27 @@ fn generate_moves() -> Vec<u64>{
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }
 
@@ -1779,19 +1810,27 @@ fn generate_moves() -> Vec<u64>{
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }
 
@@ -1828,19 +1867,27 @@ fn generate_moves() -> Vec<u64>{
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
                             if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square,SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }   
+                                
                             }
                         }else {
                             if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
+                                }
+                                
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_piece_pinned_absolute(source_square, target_square, SIDE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }
     
@@ -1878,20 +1925,21 @@ fn generate_moves() -> Vec<u64>{
 
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
-                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::BLACK as u64){
                                 move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_square_attacked(target_square, PieceColor::BLACK as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
+                                
                             }
                         }else {
-                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 {
-                                // println!("{}{} piece quiet move", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::WHITE as u64)  {
                                 move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                // println!("{}{} piece capture", SQUARE_TO_COORD[source_square as usize], SQUARE_TO_COORD[target_square as usize]);
-                                move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                if !is_square_attacked(target_square, PieceColor::WHITE as u64) {
+                                    move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
+                                }
                             }
                         }
 
@@ -1910,15 +1958,9 @@ fn generate_moves() -> Vec<u64>{
 // print move (for UCI purposes)
 fn print_move(ch_move: u64) {
     
-    println!("notation: {}{}, piece: {}, promoted piece: {}, capture flag: {}, double pawn push: {}, enpassant: {}, castling: {}", 
+    println!("{}{}", 
     SQUARE_TO_COORD[get_move_source!(ch_move) as usize],
-    SQUARE_TO_COORD[get_move_target!(ch_move) as usize],
-    ASCII_PIECES[get_move_piece!(ch_move) as usize],
-    if get_move_promoted!(ch_move) != 0 {ASCII_PIECES[get_move_promoted!(ch_move) as usize]} else {"-"},
-    if get_move_capture!(ch_move) != 0 {true} else {false},
-    if get_move_double!(ch_move) != 0 {true} else {false},
-    if get_move_enpassant!(ch_move) != 0 {true} else {false},
-    if get_move_castling!(ch_move) != 0 {true} else {false},
+    SQUARE_TO_COORD[get_move_target!(ch_move) as usize]
     );
 }
 
@@ -1928,7 +1970,7 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
     unsafe {
         if move_flag == MOVE_TYPE::all_moves {
             // Preserve board state
-            copy_board!();
+            //copy_board!();
 
             // Parse move
             let source_square = get_move_source!(ch_move);
@@ -1939,6 +1981,8 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             let double_push = get_move_double!(ch_move);
             let enpassant = get_move_enpassant!(ch_move);
             let castling = get_move_castling!(ch_move);
+
+
 
             // Move piece
             reset_bit!(PIECE_BITBOARDS[piece as usize], source_square);
@@ -1968,8 +2012,13 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             }
             // handle pawn promotions
             if promoted != 0 {
-                reset_bit!(PIECE_BITBOARDS[piece as usize], target_square);
+                if SIDE == PieceColor::WHITE as i32 {
+                    reset_bit!(PIECE_BITBOARDS[Piece::P as usize], target_square);
+                }else{
+                    reset_bit!(PIECE_BITBOARDS[Piece::p as usize], target_square);
+                }
                 set_bit!(PIECE_BITBOARDS[promoted as usize], target_square);
+                
             }
 
             // handle enpassant captures
@@ -2060,37 +2109,13 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::BLACK as usize];
 
 
+            
+
+
             // change side
             SIDE ^= 1;
-            // make sure that king has not been exposed into a check
-            if SIDE == PieceColor::WHITE as i32 {
-                let square = match index_lsb(PIECE_BITBOARDS[Piece::k as usize]) {
-                    Ok(val) => val as u64,
-                    Err(_) => panic!(),
-                };
 
-                if is_square_attacked(square, SIDE as u64){
-                    // take move back
-                    take_back!();
-                    return false;
-                }else {
-                    return true;
-                }
-            }else {
-                let square = match index_lsb(PIECE_BITBOARDS[Piece::K as usize]) {
-                    Ok(val) => val as u64,
-                    Err(_) => panic!(),
-                };
-
-                if is_square_attacked(square, SIDE as u64){
-                    // take move back
-                    take_back!();
-                    return false;
-                }else {
-                    return true;
-                }
-            }
-
+            return true;
 
         // Capture moves
         } else {
@@ -2107,6 +2132,46 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
     }
     
 }
+
+fn perft_driver(depth: u64, root: bool) -> usize {
+    let mut cnt = 0;
+    let mut nodes = 0;
+
+    let leaf = match depth {
+        2 => true,
+        _ => false,
+    };
+
+    for mv in generate_moves() {
+        if root && depth <= 1 {
+            cnt = 1;
+            nodes += 1
+        }else {
+            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+            make_move(mv, MOVE_TYPE::all_moves);
+            if leaf {
+                
+                cnt = generate_moves().len();
+                
+            }else {
+                cnt = perft_driver(depth -1, false);
+            }
+
+            nodes += cnt;
+            
+            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+        }
+
+        if root {
+            println!("{}{}: {}", SQUARE_TO_COORD[get_move_source!(mv) as usize], SQUARE_TO_COORD[get_move_target!(mv) as usize], cnt);
+        }
+    }
+
+    nodes
+
+
+}
+
 
 fn init_char_pieces(map: &mut HashMap<char, u32>) {
     map.insert('P', 0);
@@ -2130,13 +2195,155 @@ fn get_time_ms() -> u128 {
 }
 
 
+fn xray_bishop_attacks(occupancy: u64, mut blockers: u64, bishop_square: u64) -> u64 {
+    let attacks = get_bishop_attacks(bishop_square, occupancy);
+    blockers &= attacks;
+    return attacks ^ get_bishop_attacks(bishop_square, occupancy ^ blockers);
+}
+
+fn xray_rook_attacks(occupancy: u64, mut blockers: u64, rook_square: u64) -> u64 {
+    let attacks = get_rook_attacks(rook_square, occupancy);
+    blockers &= attacks;
+    return attacks ^ get_rook_attacks(rook_square, occupancy ^ blockers);
+}
+
+fn xray_queen_attacks(occupancy: u64, mut blockers: u64, queen_square: u64) -> u64 {
+    let attacks = get_queen_attacks(queen_square, occupancy);
+    blockers &= attacks;
+    return attacks ^ get_queen_attacks(queen_square, occupancy ^ blockers);
+}
+
+
+fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, piece_side: u64) -> bool {
+    unsafe {
+            // update occupancy bitboard with pinned piece move
+            let mut updated_occupancy = OCCUPANCIES[PieceColor::BOTH as usize];
+            reset_bit!(updated_occupancy, piece_source_square);
+            set_bit!(updated_occupancy, piece_target_square);
+
+            // update enemy piece occupancy
+            let mut updated_piece_bitboards = PIECE_BITBOARDS.clone();
+            if piece_side == PieceColor::WHITE as u64 {
+                for bb_piece in Piece::p as usize..=Piece::k as usize {
+                    // update black occupancies
+                    reset_bit!(updated_piece_bitboards[bb_piece], piece_target_square)
+                }
+            }else {
+                for bb_piece in Piece::P as usize..=Piece::K as usize {
+                    // update black occupancies
+                    reset_bit!(updated_piece_bitboards[bb_piece], piece_target_square)
+                }
+            }
+
+
+            let king_occupancy = match piece_side {
+                0 => PIECE_BITBOARDS[Piece::K as usize],
+                1 => PIECE_BITBOARDS[Piece::k as usize],
+                _ => panic!(),
+            };
+
+            // attacked by bishops
+            let mut bishop_occupanices = match piece_side {
+                0 => updated_piece_bitboards[Piece::b as usize],
+                1 => updated_piece_bitboards[Piece::B as usize],
+                _ => panic!(),
+            };
+            while bishop_occupanices != 0 {
+                let bishop_square = match index_lsb(bishop_occupanices) {
+                    Ok(val) => val as u64,
+                    Err(_) => panic!()
+                };
+                if get_bishop_attacks(bishop_square, updated_occupancy) & king_occupancy != 0{
+                    return true;
+                }
+
+                reset_bit!(bishop_occupanices, bishop_square);
+            }   
+            
+
+            // attacked by rooks
+            let mut rook_occupancies = match piece_side {
+                0 => updated_piece_bitboards[Piece::r as usize],
+                1 => updated_piece_bitboards[Piece::R as usize],
+                _ => panic!(),
+            };
+            while rook_occupancies != 0 {
+                let rook_square = match index_lsb(rook_occupancies) {
+                    Ok(val) => val as u64,
+                    Err(_) => panic!()
+                };
+                if get_rook_attacks(rook_square, updated_occupancy) & king_occupancy != 0{
+                    return true;
+                }
+
+                reset_bit!(rook_occupancies, rook_square);
+            }  
+
+            // attacked by queens
+            let mut queen_occupancies = match piece_side {
+                0 => updated_piece_bitboards[Piece::q as usize],
+                1 => updated_piece_bitboards[Piece::Q as usize],
+                _ => panic!(),
+            };
+            while queen_occupancies != 0 {
+                let queen_square = match index_lsb(queen_occupancies) {
+                    Ok(val) => val as u64,
+                    Err(_) => panic!()
+                };
+                if get_queen_attacks(queen_square, updated_occupancy) & king_occupancy != 0{
+                    return true;
+                }
+
+                reset_bit!(queen_occupancies, queen_square);
+            }
+
+            // attacked by knights
+            let mut knight_occupancies = match piece_side {
+                0 => updated_piece_bitboards[Piece::n as usize],
+                1 => updated_piece_bitboards[Piece::N as usize],
+                _ => panic!(),
+            };
+
+            while knight_occupancies != 0 {
+                let knight_square = match index_lsb(knight_occupancies) {
+                    Ok(val) => val,
+                    Err(_) => panic!()
+                };
+
+                if KNIGHT_ATTACKS[knight_square] & king_occupancy !=0 {
+                    return true;
+                }
+
+                reset_bit!(knight_occupancies, knight_square);
+            }
+
+            // attacked by pawns
+            let mut pawn_occupancies = match piece_side {
+                0 => updated_piece_bitboards[Piece::p as usize],
+                1 => updated_piece_bitboards[Piece::P as usize],
+                _ => panic!(),
+            };
+
+            while pawn_occupancies != 0 {
+                let pawn_square = match index_lsb(pawn_occupancies) {
+                    Ok(val) => val,
+                    Err(_) => panic!(),
+                };
+                if PAWN_ATTACKS[piece_side as usize][pawn_square] & king_occupancy != 0 {
+                    return true;
+                }
+                reset_bit!(pawn_occupancies, pawn_square);
+            }
+
+        return false;
+    }
+}
+
+
 
 fn main() {
 
     let mut char_pieces: HashMap<char, u32> = HashMap::new();
-
-    
-
 
     init_char_pieces(&mut char_pieces);
 
@@ -2145,32 +2352,31 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    
 
-    parse_fen("r3k2r/p1ppRpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1 ", &char_pieces);
-
+    parse_fen(START_POSTITION, &char_pieces);
     print_board();
-
-    let all_moves = generate_moves();
+    make_move(encode_move!(BoardSquare::d2 as u64, BoardSquare::d3 as u64, Piece::P as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
+    make_move(encode_move!(BoardSquare::c7 as u64, BoardSquare::c6 as u64, Piece::p as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
+    make_move(encode_move!(BoardSquare::e1 as u64, BoardSquare::d2 as u64, Piece::K as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
+    make_move(encode_move!(BoardSquare::d8 as u64, BoardSquare::a5 as u64, Piece::q as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
+    //make_move(encode_move!(BoardSquare::d2 as u64, BoardSquare::e1 as u64, Piece::K as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
+    print_board();
+    unsafe {
+        print_bitboard(xray_queen_attacks(OCCUPANCIES[PieceColor::BLACK as usize], OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::a5 as u64));
+        println!("{}", is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64));
+    }
+    
 
     let start = get_time_ms();
 
-    for ch_move in all_moves.iter() {
-        copy_board!();
-        
-        println!("making move: {}{} -->", SQUARE_TO_COORD[get_move_source!(*ch_move) as usize], SQUARE_TO_COORD[get_move_target!(*ch_move) as usize]);
-        
-        let is_legal_move = make_move(*ch_move, MOVE_TYPE::all_moves);
-      
-        if !is_legal_move {
-            println!("illegal move");
-            continue;
-        }
+    let nodes = perft_driver(1, true);
 
-        print_board();
-        take_back!();
+    println!("time taken to execute: {} ms", get_time_ms() - start);
+    unsafe {
+        println!("Nodes: {}", nodes);
     }
-    println!("{} ms elapsed", get_time_ms() - start);
+    
+  
     
 
 }
