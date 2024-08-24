@@ -77,31 +77,17 @@ static UNICODE_PIECES: [&str; 12] = ["♟︎", "♞", "♝", "♜", "♛", "♚"
 // piece bitboards
 static mut PIECE_BITBOARDS: [BitBoard; 12] = [0; 12];
 
-static mut PIECE_BITBOARDS_COPY: [BitBoard; 12] = [0; 12];
-
 // occupancy bitboards
 static mut OCCUPANCIES: [BitBoard; 3] = [0; 3];
-
-static mut OCCUPANCIES_COPY: [BitBoard; 3] = [0; 3];
 
 // side to move
 static mut SIDE: i32 = 0;
 
-static mut SIDE_COPY: i32 = 0;
-
 // enpassant square
 static mut ENPASSANT: u32 = BoardSquare::no_sq as u32; 
 
-static mut ENPASSANT_COPY: u32 = BoardSquare::no_sq as u32; 
-
 
 static mut CASTLE: u32 = 0;
-
-static mut CASTLE_COPY: u32 = 0;
-
-// nodes
-
-static mut NODES: u128 = 0;
 
 
 // FEN dedug positions
@@ -220,28 +206,6 @@ macro_rules! get_move_castling {
         $move & 0x800000
     };
 }
-
-// Boards state macros
-// macro_rules! copy_board {
-//     () => {
-//         let piece_bitboards_copy = PIECE_BITBOARDS;
-//         //piece_bitboards_copy = PIECE_BITBOARDS;
-//         let occupancy_copy = OCCUPANCIES;
-//         let side_copy = SIDE;
-//         let enpassant_copy = ENPASSANT;
-//         let castle_copy = CASTLE;
-//     }; 
-// }
-
-// macro_rules! take_back {
-//     () => {
-//         PIECE_BITBOARDS = piece_bitboards_copy;
-//         OCCUPANCIES = occupancy_copy;
-//         SIDE = side_copy;
-//         ENPASSANT = enpassant_copy;
-//         CASTLE = castle_copy;
-//     }; 
-// }
 
 
 // Random numbers
@@ -1925,19 +1889,19 @@ fn generate_moves() -> Vec<u64>{
 
                         // quiet move
                         if SIDE == PieceColor::WHITE as i32 {
-                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::BLACK as u64){
+                            if get_bit!(OCCUPANCIES[PieceColor::BLACK as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::BLACK as u64) && !is_king_in_check(source_square, target_square, SIDE as u64){
                                 move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                if !is_square_attacked(target_square, PieceColor::BLACK as u64) {
+                                if !is_square_attacked(target_square, PieceColor::BLACK as u64) && !is_king_in_check(source_square, target_square, SIDE as u64) {
                                     move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                                 }
                                 
                             }
                         }else {
-                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::WHITE as u64)  {
+                            if get_bit!(OCCUPANCIES[PieceColor::WHITE as usize], target_square) == 0 && !is_square_attacked(target_square, PieceColor::WHITE as u64) && !is_king_in_check(source_square, target_square, SIDE as u64)  {
                                 move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 0, 0, 0, 0));
                             }else {
-                                if !is_square_attacked(target_square, PieceColor::WHITE as u64) {
+                                if !is_square_attacked(target_square, PieceColor::WHITE as u64) && !is_king_in_check(source_square, target_square, SIDE as u64) {
                                     move_list.push(encode_move!(source_square, target_square, piece as u64, 0, 1, 0, 0, 0));
                                 }
                             }
@@ -1970,8 +1934,6 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
     unsafe {
         if move_flag == MOVE_TYPE::all_moves {
             // Preserve board state
-            //copy_board!();
-
             // Parse move
             let source_square = get_move_source!(ch_move);
             let target_square = get_move_target!(ch_move);
@@ -2108,10 +2070,6 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::WHITE as usize];
             OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::BLACK as usize];
 
-
-            
-
-
             // change side
             SIDE ^= 1;
 
@@ -2195,25 +2153,6 @@ fn get_time_ms() -> u128 {
 }
 
 
-fn xray_bishop_attacks(occupancy: u64, mut blockers: u64, bishop_square: u64) -> u64 {
-    let attacks = get_bishop_attacks(bishop_square, occupancy);
-    blockers &= attacks;
-    return attacks ^ get_bishop_attacks(bishop_square, occupancy ^ blockers);
-}
-
-fn xray_rook_attacks(occupancy: u64, mut blockers: u64, rook_square: u64) -> u64 {
-    let attacks = get_rook_attacks(rook_square, occupancy);
-    blockers &= attacks;
-    return attacks ^ get_rook_attacks(rook_square, occupancy ^ blockers);
-}
-
-fn xray_queen_attacks(occupancy: u64, mut blockers: u64, queen_square: u64) -> u64 {
-    let attacks = get_queen_attacks(queen_square, occupancy);
-    blockers &= attacks;
-    return attacks ^ get_queen_attacks(queen_square, occupancy ^ blockers);
-}
-
-
 fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, piece_side: u64) -> bool {
     unsafe {
             // update occupancy bitboard with pinned piece move
@@ -2222,16 +2161,16 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
             set_bit!(updated_occupancy, piece_target_square);
 
             // update enemy piece occupancy
-            let mut updated_piece_bitboards = PIECE_BITBOARDS.clone();
+            let mut updated_enemy_piece_bitboards = PIECE_BITBOARDS.clone();
             if piece_side == PieceColor::WHITE as u64 {
                 for bb_piece in Piece::p as usize..=Piece::k as usize {
-                    // update black occupancies
-                    reset_bit!(updated_piece_bitboards[bb_piece], piece_target_square)
+                    // update black piece occupancies
+                    reset_bit!(updated_enemy_piece_bitboards[bb_piece], piece_target_square);
                 }
             }else {
                 for bb_piece in Piece::P as usize..=Piece::K as usize {
-                    // update black occupancies
-                    reset_bit!(updated_piece_bitboards[bb_piece], piece_target_square)
+                    // update white piece occupancies
+                    reset_bit!(updated_enemy_piece_bitboards[bb_piece], piece_target_square);
                 }
             }
 
@@ -2244,8 +2183,8 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
 
             // attacked by bishops
             let mut bishop_occupanices = match piece_side {
-                0 => updated_piece_bitboards[Piece::b as usize],
-                1 => updated_piece_bitboards[Piece::B as usize],
+                0 => updated_enemy_piece_bitboards[Piece::b as usize],
+                1 => updated_enemy_piece_bitboards[Piece::B as usize],
                 _ => panic!(),
             };
             while bishop_occupanices != 0 {
@@ -2263,8 +2202,8 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
 
             // attacked by rooks
             let mut rook_occupancies = match piece_side {
-                0 => updated_piece_bitboards[Piece::r as usize],
-                1 => updated_piece_bitboards[Piece::R as usize],
+                0 => updated_enemy_piece_bitboards[Piece::r as usize],
+                1 => updated_enemy_piece_bitboards[Piece::R as usize],
                 _ => panic!(),
             };
             while rook_occupancies != 0 {
@@ -2281,8 +2220,8 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
 
             // attacked by queens
             let mut queen_occupancies = match piece_side {
-                0 => updated_piece_bitboards[Piece::q as usize],
-                1 => updated_piece_bitboards[Piece::Q as usize],
+                0 => updated_enemy_piece_bitboards[Piece::q as usize],
+                1 => updated_enemy_piece_bitboards[Piece::Q as usize],
                 _ => panic!(),
             };
             while queen_occupancies != 0 {
@@ -2299,8 +2238,8 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
 
             // attacked by knights
             let mut knight_occupancies = match piece_side {
-                0 => updated_piece_bitboards[Piece::n as usize],
-                1 => updated_piece_bitboards[Piece::N as usize],
+                0 => updated_enemy_piece_bitboards[Piece::n as usize],
+                1 => updated_enemy_piece_bitboards[Piece::N as usize],
                 _ => panic!(),
             };
 
@@ -2319,8 +2258,8 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
 
             // attacked by pawns
             let mut pawn_occupancies = match piece_side {
-                0 => updated_piece_bitboards[Piece::p as usize],
-                1 => updated_piece_bitboards[Piece::P as usize],
+                0 => updated_enemy_piece_bitboards[Piece::p as usize],
+                1 => updated_enemy_piece_bitboards[Piece::P as usize],
                 _ => panic!(),
             };
 
@@ -2329,11 +2268,92 @@ fn is_piece_pinned_absolute(piece_source_square: u64, piece_target_square:u64, p
                     Ok(val) => val,
                     Err(_) => panic!(),
                 };
-                if PAWN_ATTACKS[piece_side as usize][pawn_square] & king_occupancy != 0 {
+                let enemy_pawn_side = match piece_side {
+                    0 => 1,
+                    1 => 0,
+                    _ => panic!(),
+                };
+                if PAWN_ATTACKS[enemy_pawn_side as usize][pawn_square] & king_occupancy != 0 {
                     return true;
                 }
                 reset_bit!(pawn_occupancies, pawn_square);
             }
+
+        return false;
+    }
+}
+
+fn is_king_in_check(king_source_square: u64, king_target_square: u64, king_color: u64) -> bool {
+    unsafe {
+        let mut updated_occupancies = OCCUPANCIES[PieceColor::BOTH as usize];
+
+        reset_bit!(updated_occupancies, king_source_square);
+        set_bit!(updated_occupancies, king_target_square);
+
+        let mut king_occupancy = match king_color {
+            0 => PIECE_BITBOARDS[Piece::K as usize],
+            1 => PIECE_BITBOARDS[Piece::k as usize],
+            _ => panic!(),
+        };
+
+        reset_bit!(king_occupancy, king_source_square);
+        set_bit!(king_occupancy, king_target_square);
+        
+        // attacked by bishops
+        let mut bishop_occupanices = match king_color {
+            0 => PIECE_BITBOARDS[Piece::b as usize],
+            1 => PIECE_BITBOARDS[Piece::B as usize],
+            _ => panic!(),
+        };
+        while bishop_occupanices != 0 {
+            let bishop_square = match index_lsb(bishop_occupanices) {
+                Ok(val) => val as u64,
+                Err(_) => panic!()
+            };
+            if get_bishop_attacks(bishop_square, updated_occupancies) & king_occupancy != 0{
+                return true;
+            }
+
+            reset_bit!(bishop_occupanices, bishop_square);
+        }
+
+        // attacked by rooks
+        let mut rook_occupancies = match king_color {
+            0 => PIECE_BITBOARDS[Piece::r as usize],
+            1 => PIECE_BITBOARDS[Piece::R as usize],
+            _ => panic!(),
+        };
+        while rook_occupancies != 0 {
+            let rook_square = match index_lsb(rook_occupancies) {
+                Ok(val) => val as u64,
+                Err(_) => panic!()
+            };
+            if get_rook_attacks(rook_square, updated_occupancies) & king_occupancy != 0{
+                return true;
+            }
+
+            reset_bit!(rook_occupancies, rook_square);
+        }
+
+        // attacked by queens
+        let mut queen_occupancies = match king_color {
+            0 => PIECE_BITBOARDS[Piece::q as usize],
+            1 => PIECE_BITBOARDS[Piece::Q as usize],
+            _ => panic!(),
+        };
+        while queen_occupancies != 0 {
+            let rook_square = match index_lsb(queen_occupancies) {
+                Ok(val) => val as u64,
+                Err(_) => panic!()
+            };
+            if get_queen_attacks(rook_square, updated_occupancies) & king_occupancy != 0{
+                return true;
+            }
+
+            reset_bit!(queen_occupancies, rook_square);
+        }      
+        
+
 
         return false;
     }
@@ -2353,30 +2373,15 @@ fn main() {
     init_sliders_table(0);
 
 
-    parse_fen(START_POSTITION, &char_pieces);
-    print_board();
-    make_move(encode_move!(BoardSquare::d2 as u64, BoardSquare::d3 as u64, Piece::P as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
-    make_move(encode_move!(BoardSquare::c7 as u64, BoardSquare::c6 as u64, Piece::p as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
-    make_move(encode_move!(BoardSquare::e1 as u64, BoardSquare::d2 as u64, Piece::K as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
-    make_move(encode_move!(BoardSquare::d8 as u64, BoardSquare::a5 as u64, Piece::q as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
-    //make_move(encode_move!(BoardSquare::d2 as u64, BoardSquare::e1 as u64, Piece::K as u64, 0, 0, 0, 0, 0), MOVE_TYPE::all_moves);
-    print_board();
-    unsafe {
-        print_bitboard(xray_queen_attacks(OCCUPANCIES[PieceColor::BLACK as usize], OCCUPANCIES[PieceColor::BOTH as usize], BoardSquare::a5 as u64));
-        println!("{}", is_square_attacked(BoardSquare::e1 as u64, PieceColor::BLACK as u64));
-    }
-    
+    parse_fen(TRICKY_POSITION, &char_pieces);
+    print_board();    
 
     let start = get_time_ms();
 
-    let nodes = perft_driver(1, true);
+    let nodes = perft_driver(6, true);
 
     println!("time taken to execute: {} ms", get_time_ms() - start);
-    unsafe {
-        println!("Nodes: {}", nodes);
-    }
     
-  
-    
+    println!("Nodes: {}", nodes);    
 
 }
