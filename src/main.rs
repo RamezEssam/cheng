@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
+use rand::Rng;
 
 
 #[derive(Debug)]
@@ -2453,8 +2454,20 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 }
 
 fn search_position(depth: usize) {
-    // best move placeholder
-    println!("best move d2d4");
+    // dummy engine mode. i.e choose a random legal move
+    let legal_moves = generate_moves();
+
+    let mut rng = rand::thread_rng();
+
+    let random_index = rng.gen_range(0..legal_moves.len());
+
+    let best_move = legal_moves[random_index];
+
+    println!("best move: {}{}{}",
+    SQUARE_TO_COORD[get_move_source!(best_move) as usize],
+    SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+    if get_move_promoted!(best_move) != 0 {ASCII_PIECES[get_move_promoted!(best_move) as usize]} else {""}
+    );
 }
 
 // parse UCI "go" command
