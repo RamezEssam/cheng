@@ -2486,13 +2486,13 @@ fn parse_go(command: String) {
 
             // search position
             search_position(depth);
-            println!("depth: {}", depth);
+            //println!("depth: {}", depth);
         }
     // different time controls placeholder
     }else {
         let depth = 6;
         search_position(depth);
-        println!("depth: {}", depth);
+        //println!("depth: {}", depth);
     }
 }
 
