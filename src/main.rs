@@ -2430,8 +2430,7 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 
         let caps =re.find(fen_pos.as_str()).unwrap();
 
-
-        parse_fen(&fen_pos, char_pieces);
+        parse_fen(caps.as_str(), char_pieces);
 
         let moves = fen_pos.chars().skip(caps.end()+6).collect::<Vec<char>>().iter().collect::<String>();
 
