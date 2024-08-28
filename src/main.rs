@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use regex::Regex;
 
+
+#[derive(Debug)]
 enum Error {
     ZeroBitError,
+    IllegalMoveError,
 }
+
+
 
 
 // Define bitboard type
@@ -1919,13 +1925,18 @@ fn generate_moves() -> Vec<u64>{
     move_list
 }
 
-// print move (for UCI purposes)
-fn print_move(ch_move: u64) {
+// (for UCI purposes)
+fn get_uci_move(ch_move: u64) -> String {
+
+    let promoted = get_move_promoted!(ch_move);
     
-    println!("{}{}", 
+    let uci_move = format!("{}{}{}", 
     SQUARE_TO_COORD[get_move_source!(ch_move) as usize],
-    SQUARE_TO_COORD[get_move_target!(ch_move) as usize]
+    SQUARE_TO_COORD[get_move_target!(ch_move) as usize],
+    if promoted != 0 {ASCII_PIECES[promoted as usize]} else {""},
     );
+
+    return uci_move;
 }
 
 
@@ -2359,6 +2370,88 @@ fn is_king_in_check(king_source_square: u64, king_target_square: u64, king_color
     }
 }
 
+// parse user/GUI move string input (e.g. "e7e8q")
+fn parse_move(str_move: &str) -> Result<u64, Error>{
+    let legal_moves = generate_moves();
+
+    //let source_square = (str_move.chars().nth(0).unwrap() as u32 - 'a' as u32) + (8 - (str_move.chars().nth(1).unwrap() as u32 - '0' as u32)) * 8;
+    //let target_square = (str_move.chars().nth(2).unwrap() as u32 - 'a' as u32) + (8 - (str_move.chars().nth(3).unwrap() as u32 - '0' as u32)) * 8;
+
+    for mv in legal_moves {
+        let legal_str_move = get_uci_move(mv);
+
+        if legal_str_move == String::from(str_move) {
+            return Ok(mv);
+        }
+    }
+
+    return Err(Error::IllegalMoveError);
+}
+
+// Example UCI commands to init position on chess board
+    
+//     // init start position
+//     position startpos
+    
+//     // init start position and make the moves on chess board
+//     position startpos moves e2e4 e7e5
+    
+//     // init position from FEN string
+//     position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 
+    
+//     // init position from fen string and make moves on chess board
+//     position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 moves e2a6 e8g8
+
+fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
+    
+    let start_pos = command.chars().take(17).collect::<Vec<char>>().iter().collect::<String>();
+
+    let start_fen = command.chars().take(12).collect::<Vec<char>>().iter().collect::<String>();
+
+    if start_pos == "position startpos" {
+        parse_fen(START_POSTITION, char_pieces);
+
+        let moves = command.chars().skip(24).collect::<Vec<char>>().iter().collect::<String>();
+
+        if moves.chars().count() > 0 {
+            for mv in moves.split(" ") {
+                let ch_mv = match parse_move(mv) {
+                    Ok(val) => val,
+                    Err(_) => panic!("illegal move: {}", mv),
+                };
+                make_move(ch_mv, MOVE_TYPE::all_moves);
+            }
+        }
+        
+    }else if start_fen == "position fen" {
+        let fen_pos = command.chars().skip(13).collect::<Vec<char>>().iter().collect::<String>();
+
+        let re = Regex::new(r"^(([rnbqkpRNBQKP1-8]{1,8}/){7}[rnbqkpRNBQKP1-8]{1,8})\s[bw]\s(-|[KQkq]{1,4})\s(-|[a-h][36])\s\d+\s\d+\s*").expect("invalid regex");
+
+        let caps =re.find(fen_pos.as_str()).unwrap();
+
+
+        parse_fen(&fen_pos, char_pieces);
+
+        let moves = fen_pos.chars().skip(caps.end()+6).collect::<Vec<char>>().iter().collect::<String>();
+
+        if moves.chars().count() > 0 {
+            for mv in moves.split(" ") {
+                let ch_mv = match parse_move(mv) {
+                    Ok(val) => val,
+                    Err(_) => panic!("illegal move: {}", mv),
+                };
+                make_move(ch_mv, MOVE_TYPE::all_moves);
+            }
+        }
+
+
+    }
+    
+
+
+}
+
 
 
 fn main() {
@@ -2372,16 +2465,10 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-
-    parse_fen(TRICKY_POSITION, &char_pieces);
+    parse_position("position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 moves e2a6 e8g8".to_string(), &char_pieces);
     print_board();    
 
-    let start = get_time_ms();
-
-    let nodes = perft_driver(6, true);
-
-    println!("time taken to execute: {} ms", get_time_ms() - start);
     
-    println!("Nodes: {}", nodes);    
+
 
 }
