@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{self, Write};
 use regex::Regex;
 
 
@@ -2428,7 +2429,10 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 
         let re = Regex::new(r"^(([rnbqkpRNBQKP1-8]{1,8}/){7}[rnbqkpRNBQKP1-8]{1,8})\s[bw]\s(-|[KQkq]{1,4})\s(-|[a-h][36])\s\d+\s\d+\s*").expect("invalid regex");
 
-        let caps =re.find(fen_pos.as_str()).unwrap();
+        let caps = match re.find(fen_pos.as_str()) {
+            Some(v) => v,
+            None => return,
+        };
 
         parse_fen(caps.as_str(), char_pieces);
 
@@ -2446,9 +2450,73 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 
 
     }
+}
+
+fn search_position(depth: usize) {
+    // best move placeholder
+    println!("best move d2d4");
+}
+
+// parse UCI "go" command
+fn parse_go(command: String) {
+
+    let subcommand = command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>();
+
+    if subcommand == "depth" {
+        let current_depth = command.chars().skip(9).collect::<Vec<char>>().iter().collect::<String>();
+
+        if current_depth.chars().count() > 0 {
+            let depth = match current_depth.parse::<usize>() {
+                Ok(val) => val,
+                Err(e) => panic!("unknown value for depth: {}", e),
+            };
+
+            // search position
+            search_position(depth);
+            println!("depth: {}", depth);
+        }
+    // different time controls placeholder
+    }else {
+        let depth = 6;
+
+        println!("depth: {}", depth);
+    }
+}
+
+fn uci_loop(char_pieces: &HashMap<char, u32>) {
+    println!("id name cheng");
+    println!("id author Ramez Essam");
+    println!("uciok");
+    let mut input = String::new();
     
+    loop {
+        io::stdout().flush().unwrap();
+        // read input from stdin
+        io::stdin().read_line(&mut input).expect("failed to read line");
+        input = input.trim().to_string();
+
+        if input == "isready" {
+            println!("readyok");
+        }else if input.chars().take(8).collect::<Vec<char>>().iter().collect::<String>() == "position" {
+            parse_position(input.clone(), char_pieces);
+        }else if input.chars().take(10).collect::<Vec<char>>().iter().collect::<String>() == "ucinewgame" {
+            parse_position("position startpos".to_string(), char_pieces);
+        }else if input.chars().take(2).collect::<Vec<char>>().iter().collect::<String>() == "go" {
+            parse_go(input.clone());
+        }else if input.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "quit" {
+            break;
+        }else if input.chars().take(3).collect::<Vec<char>>().iter().collect::<String>() == "uci" {
+            println!("id name cheng");
+            println!("id author Ramez Essam");
+            println!("uciok");
+        }else if input.chars().take(1).collect::<Vec<char>>().iter().collect::<String>() == "d" {
+            print_board();
+        }
+
+        input.clear();
 
 
+    }
 }
 
 
@@ -2464,10 +2532,7 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    parse_position("position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 moves e2a6 e8g8".to_string(), &char_pieces);
-    print_board();    
-
-    
+    uci_loop(&char_pieces);
 
 
 }
