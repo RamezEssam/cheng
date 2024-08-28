@@ -2463,6 +2463,8 @@ fn search_position(depth: usize) {
 
     let best_move = legal_moves[random_index];
 
+    make_move(best_move, MOVE_TYPE::all_moves);
+
     println!("best move: {}{}{}",
     SQUARE_TO_COORD[get_move_source!(best_move) as usize],
     SQUARE_TO_COORD[get_move_target!(best_move) as usize],
