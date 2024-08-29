@@ -2463,13 +2463,20 @@ fn search_position(depth: usize) {
 
     let best_move = legal_moves[random_index];
 
-    make_move(best_move, MOVE_TYPE::all_moves);
+    //make_move(best_move, MOVE_TYPE::all_moves);
 
-    println!("best move: {}{}{}",
-    SQUARE_TO_COORD[get_move_source!(best_move) as usize],
-    SQUARE_TO_COORD[get_move_target!(best_move) as usize],
-    if get_move_promoted!(best_move) != 0 {ASCII_PIECES[get_move_promoted!(best_move) as usize]} else {""}
-    );
+    if get_move_promoted!(best_move) != 0 {
+        println!("best move {}{}{}",
+        SQUARE_TO_COORD[get_move_source!(best_move) as usize],
+        SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+        ASCII_PIECES[get_move_promoted!(best_move) as usize]
+        );
+    }else {
+        println!("best move: {}{}",
+        SQUARE_TO_COORD[get_move_source!(best_move) as usize],
+        SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+        );
+    }
 }
 
 // parse UCI "go" command
