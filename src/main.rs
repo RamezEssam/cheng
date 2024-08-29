@@ -2466,13 +2466,13 @@ fn search_position(depth: usize) {
     //make_move(best_move, MOVE_TYPE::all_moves);
 
     if get_move_promoted!(best_move) != 0 {
-        println!("best move {}{}{}",
+        println!("bestmove {}{}{}",
         SQUARE_TO_COORD[get_move_source!(best_move) as usize],
         SQUARE_TO_COORD[get_move_target!(best_move) as usize],
         ASCII_PIECES[get_move_promoted!(best_move) as usize]
         );
     }else {
-        println!("best move: {}{}",
+        println!("bestmove {}{}",
         SQUARE_TO_COORD[get_move_source!(best_move) as usize],
         SQUARE_TO_COORD[get_move_target!(best_move) as usize],
         );
