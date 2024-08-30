@@ -2633,14 +2633,32 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
 
             let old_alpha = alpha;
 
+            let mut in_check: bool = false;
+
+            if SIDE == PieceColor::WHITE as i32 {
+                let king_square = match index_lsb(PIECE_BITBOARDS[Piece::K as usize]){
+                    Ok(val) => val as u64,
+                    Err(_) => panic!(),
+                };
+
+                in_check = is_square_attacked(king_square, PieceColor::BLACK as u64);
+            }else {
+                let king_square = match index_lsb(PIECE_BITBOARDS[Piece::k as usize]){
+                    Ok(val) => val as u64,
+                    Err(_) => panic!(),
+                };
+
+                in_check = is_square_attacked(king_square, PieceColor::WHITE as u64);
+            }            
+
             let legal_moves = generate_moves();
 
-            for mv in legal_moves {
+            for mv in legal_moves.iter() {
                 let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
 
                 PLY += 1;
 
-                make_move(mv, MOVE_TYPE::all_moves);
+                make_move(*mv, MOVE_TYPE::all_moves);
 
                 let score = -negamax(-beta, -alpha, depth-1);
 
@@ -2660,8 +2678,16 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
 
                     if PLY == 0 {
                         // associate best move with the best score
-                        best_sofar = mv;
+                        best_sofar = *mv;
                     }
+                }
+            }
+            // detecting checkmate and stalemate
+            if legal_moves.len() == 0 {
+                if in_check {
+                    return -49000 + PLY as i32;
+                }else {
+                    return 0;
                 }
             }
 
@@ -2755,6 +2781,5 @@ fn main() {
 
     uci_loop(&char_pieces);
 
-    
 
 }
