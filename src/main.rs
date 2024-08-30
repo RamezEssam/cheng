@@ -2021,11 +2021,23 @@ fn generate_moves() -> Vec<u64>{
 fn get_uci_move(ch_move: u64) -> String {
 
     let promoted = get_move_promoted!(ch_move);
+
+    let promoted_piece = match ASCII_PIECES[promoted as usize] {
+        "Q" => "q",
+        "R" => "r",
+        "B" => "b",
+        "N" => "n",
+        "q" => "q",
+        "r" => "r",
+        "b" => "b",
+        "n" => "n",
+        _ => ""
+    };
     
     let uci_move = format!("{}{}{}", 
     SQUARE_TO_COORD[get_move_source!(ch_move) as usize],
     SQUARE_TO_COORD[get_move_target!(ch_move) as usize],
-    if promoted != 0 {ASCII_PIECES[promoted as usize]} else {""},
+    promoted_piece,
     );
 
     return uci_move;
@@ -2718,13 +2730,12 @@ fn parse_go(command: String) {
 
             // search position
             search_position(depth);
-            //println!("depth: {}", depth);
         }
     // different time controls placeholder
     }else {
         let depth = 6;
         search_position(depth);
-        //println!("depth: {}", depth);
+
     }
 }
 
