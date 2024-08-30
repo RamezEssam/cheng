@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::i32;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
-use rand::Rng;
+//use rand::Rng;
 
 
 #[derive(Debug)]
@@ -10,8 +11,6 @@ enum Error {
     ZeroBitError,
     IllegalMoveError,
 }
-
-
 
 
 // Define bitboard type
@@ -94,8 +93,14 @@ static mut SIDE: i32 = 0;
 // enpassant square
 static mut ENPASSANT: u32 = BoardSquare::no_sq as u32; 
 
-
+// Castling rights
 static mut CASTLE: u32 = 0;
+
+// half move (ply)
+static mut PLY: usize = 0;
+
+// best move so far
+static mut BEST_MOVE: u64 = 0; 
 
 
 // FEN dedug positions
@@ -106,7 +111,92 @@ static KILLER_POSITION: &str = "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNB
 static CMK_POSITION: &str = "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/3pP3/3P1NPP/PPP1NPB1/R1BQ1RK1 b - - 0 9 ";
 
 
+static MATERIAL_SCORE: [i32; 12] = [
+    100,      // white pawn score
+    300,      // white knight scrore
+    350,      // white bishop score
+    500,      // white rook score
+   1000,      // white queen score
+  10000,      // white king score
+   -100,      // black pawn score
+   -300,      // black knight scrore
+   -350,      // black bishop score
+   -500,      // black rook score
+  -1000,      // black queen score
+ -10000,      // black king score
+];
 
+
+// pawn positional score
+static PAWN_SCORE: [i32; 64] = [
+    0,   0,   0,   0,   0,   0,   0,   0,
+    0,   0,   0, -10, -10,   0,   0,   0,
+    0,   0,   0,   5,   5,   0,   0,   0,
+    5,   5,  10,  20,  20,   5,   5,   5,
+    10,  10,  10,  20,  20,  10,  10,  10,
+    20,  20,  20,  30,  30,  30,  20,  20,
+    30,  30,  30,  40,  40,  30,  30,  30,
+    90,  90,  90,  90,  90,  90,  90,  90,
+];
+
+// knight positional score
+static KNIGHT_SCORE: [i32; 64] = [
+    -5, -10,   0,   0,   0,   0, -10,  -5,
+    -5,   0,   0,   0,   0,   0,   0,  -5,
+    -5,   5,  20,  10,  10,  20,   5,  -5,
+    -5,  10,  20,  30,  30,  20,  10,  -5,
+    -5,  10,  20,  30,  30,  20,  10,  -5,
+    -5,   5,  20,  20,  20,  20,   5,  -5,
+    -5,   0,   0,  10,  10,   0,   0,  -5,
+    -5,   0,   0,   0,   0,   0,   0,  -5,
+];
+
+// bishop positional score
+static  BISHOP_SCORE: [i32; 64] = [
+    0,   0, -10,   0,   0, -10,   0,   0,
+    0,  30,   0,   0,   0,   0,  30,   0,
+    0,  10,   0,   0,   0,   0,  10,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,   0,  10,  10,   0,   0,   0,
+    0,   0,   0,   0,   0,   0,   0,   0,
+    0,   0,   0,   0,   0,   0,   0,   0,
+];
+
+// rook positional score
+static  ROOK_SCORE: [i32; 64] = [
+    0,   0,   0,  20,  20,   0,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    0,   0,  10,  20,  20,  10,   0,   0,
+    50,  50,  50,  50,  50,  50,  50,  50,
+    50,  50,  50,  50,  50,  50,  50,  50,
+];
+
+// king positional score
+static  KING_SCORE: [i32; 64] = [
+    0,   0,   5,   0, -15,   0,  10,   0,
+    0,   5,   5,  -5,  -5,   0,   5,   0,
+    0,   0,   5,  10,  10,   5,   0,   0,
+    0,   5,  10,  20,  20,  10,   5,   0,
+    0,   5,  10,  20,  20,  10,   5,   0,
+    0,   5,   5,  10,  10,   5,   5,   0,
+    0,   0,   5,   5,   5,   5,   0,   0,
+    0,   0,   0,   0,   0,   0,   0,   0,
+];
+
+static MIRROR_SCORE: [usize; 64] = [
+    63, 62, 61, 60, 59, 58, 57, 56,
+    55, 54, 53, 52, 51, 50, 49, 48,
+    47, 46, 45, 44, 43, 42, 41, 40,
+    39, 38, 37, 36, 35, 34, 33, 32,
+    31, 30, 29, 28, 27, 26, 25, 24,
+    23, 22, 21, 20, 19, 18, 17, 16,
+    15, 14, 13, 12, 11, 10, 9,  8, 
+    0 , 1 , 2,  3,  4,  5,  6,  7
+];
 
 // set/get/reset bit macros
 #[macro_export]
@@ -2454,28 +2544,135 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 }
 
 fn search_position(depth: usize) {
-    // dummy engine mode. i.e choose a random legal move
-    let legal_moves = generate_moves();
+    // find best move within a given position
+    let score = negamax(-50000, 50000, depth);
 
-    let mut rng = rand::thread_rng();
+    unsafe {
+        let best_move = BEST_MOVE;
 
-    let random_index = rng.gen_range(0..legal_moves.len());
+        if get_move_promoted!(best_move) != 0 {
+            println!("bestmove {}{}{}",
+            SQUARE_TO_COORD[get_move_source!(best_move) as usize],
+            SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+            ASCII_PIECES[get_move_promoted!(best_move) as usize]
+            );
+        }else {
+            println!("bestmove {}{}",
+            SQUARE_TO_COORD[get_move_source!(best_move) as usize],
+            SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+            );
+        }
+    }
+}
 
-    let best_move = legal_moves[random_index];
+fn evaluate() -> i32 {
+    let mut score = 0;
 
-    //make_move(best_move, MOVE_TYPE::all_moves);
+    let mut bitboard: u64 = 0;
 
-    if get_move_promoted!(best_move) != 0 {
-        println!("bestmove {}{}{}",
-        SQUARE_TO_COORD[get_move_source!(best_move) as usize],
-        SQUARE_TO_COORD[get_move_target!(best_move) as usize],
-        ASCII_PIECES[get_move_promoted!(best_move) as usize]
-        );
-    }else {
-        println!("bestmove {}{}",
-        SQUARE_TO_COORD[get_move_source!(best_move) as usize],
-        SQUARE_TO_COORD[get_move_target!(best_move) as usize],
-        );
+    //let mut piece = 0;
+
+    let mut square = 0;
+
+    for bb_piece in Piece::P as usize..=Piece::k as usize {
+        unsafe {
+            bitboard = PIECE_BITBOARDS[bb_piece];
+
+            while bitboard != 0 {
+                //piece = bb_piece;
+
+                square = match index_lsb(bitboard) {
+                    Ok(val) => val,
+                    Err(_) => panic!(),
+                };
+                // score material weights
+                
+
+                // score positional piece scores
+                match bb_piece {
+                    // evaluate white pieces
+                    0 => score += PAWN_SCORE[square],
+                    1 => score += KNIGHT_SCORE[square],
+                    2 => score += BISHOP_SCORE[square],
+                    3 => score += ROOK_SCORE[square],
+                    5 => score += KING_SCORE[square],
+
+                    // evaluate Black pieces
+                    6 => score -= PAWN_SCORE[MIRROR_SCORE[square]],
+                    7 => score -= KNIGHT_SCORE[MIRROR_SCORE[square]],
+                    8 => score -= BISHOP_SCORE[MIRROR_SCORE[square]],
+                    9 => score -= ROOK_SCORE[MIRROR_SCORE[square]],
+                    11 => score -= KING_SCORE[MIRROR_SCORE[square]],
+
+                    _ => {},
+                }
+
+                reset_bit!(bitboard, square);
+            }
+        }
+    }
+
+    unsafe {
+        if SIDE == PieceColor::WHITE as i32 {
+            score
+        }else {
+            -score
+        }
+    }
+
+}
+
+fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
+    unsafe {
+        if depth == 0 {
+            
+            return evaluate();
+
+        }else {
+            let mut best_sofar: u64 = 0;
+
+            let old_alpha = alpha;
+
+            let legal_moves = generate_moves();
+
+            for mv in legal_moves {
+                let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+
+                PLY += 1;
+
+                make_move(mv, MOVE_TYPE::all_moves);
+
+                let score = -negamax(-beta, -alpha, depth-1);
+
+                PLY -=1;
+
+                take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+
+                // fail-hard beta cutoff
+                if score >= beta {
+                    return beta;
+                }
+
+                // found a better move
+                if score > alpha {
+                    // PV node (move)
+                    alpha = score;
+
+                    if PLY == 0 {
+                        // associate best move with the best score
+                        best_sofar = mv;
+                    }
+                }
+            }
+
+            // found better move
+            if old_alpha != alpha {
+                BEST_MOVE = best_sofar;
+
+            }
+
+            return alpha;
+        }
     }
 }
 
@@ -2533,6 +2730,8 @@ fn uci_loop(char_pieces: &HashMap<char, u32>) {
             println!("uciok");
         }else if input.chars().take(1).collect::<Vec<char>>().iter().collect::<String>() == "d" {
             print_board();
+        }else if input.chars().take(8).collect::<Vec<char>>().iter().collect::<String>() == "evaluate" {
+            println!("static evaluation: {}", evaluate());
         }
 
         input.clear();
@@ -2556,5 +2755,6 @@ fn main() {
 
     uci_loop(&char_pieces);
 
+    
 
 }
