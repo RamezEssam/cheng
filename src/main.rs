@@ -102,6 +102,10 @@ static mut PLY: usize = 0;
 // best move so far
 static mut BEST_MOVE: u64 = 0; 
 
+// NODES searched in a give position
+
+static mut NODES: usize = 0;
+
 
 // FEN dedug positions
 static EMPTY_BOARD: &str = "8/8/8/8/8/8/8/8 w - - ";
@@ -2562,6 +2566,8 @@ fn search_position(depth: usize) {
     unsafe {
         let best_move = BEST_MOVE;
 
+        println!("info score cp {} depth {} nodes {}", score, depth, NODES);
+
         if get_move_promoted!(best_move) != 0 {
             println!("bestmove {}{}{}",
             SQUARE_TO_COORD[get_move_source!(best_move) as usize],
@@ -2641,6 +2647,8 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
             return evaluate();
 
         }else {
+            NODES += 1;
+
             let mut best_sofar: u64 = 0;
 
             let old_alpha = alpha;
