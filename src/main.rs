@@ -2643,7 +2643,9 @@ fn evaluate() -> i32 {
 fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     //print_board();
     unsafe{
-        // evaluate position
+    // increment nodes count
+    NODES += 1;
+    // evaluate position
     let evaluation = evaluate();
 
     // fail-hard beta cutoff
