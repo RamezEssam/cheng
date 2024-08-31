@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::i32;
+use std::mem::swap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
@@ -200,6 +201,61 @@ static MIRROR_SCORE: [usize; 64] = [
     23, 22, 21, 20, 19, 18, 17, 16,
     15, 14, 13, 12, 11, 10, 9,  8, 
     0 , 1 , 2,  3,  4,  5,  6,  7
+];
+
+// most valuable victim & less valuable attacker
+
+/*
+                          
+    (Victims) Pawn Knight Bishop   Rook  Queen   King
+  (Attackers)
+        Pawn   105    205    305    405    505    605
+      Knight   104    204    304    404    504    604
+      Bishop   103    203    303    403    503    603
+        Rook   102    202    302    402    502    602
+       Queen   101    201    301    401    501    601
+        King   100    200    300    400    500    600
+
+*/
+
+static MVV_LVA: [[usize; 12]; 12] = [
+    [
+        105, 205, 305, 405, 505, 605,  105, 205, 305, 405, 505, 605,
+    ],
+    [
+        104, 204, 304, 404, 504, 604,  104, 204, 304, 404, 504, 604,
+    ],
+    [
+        103, 203, 303, 403, 503, 603,  103, 203, 303, 403, 503, 603,
+    ],
+    [
+        102, 202, 302, 402, 502, 602,  102, 202, 302, 402, 502, 602,
+    ],
+    [
+        101, 201, 301, 401, 501, 601,  101, 201, 301, 401, 501, 601,
+    ],
+    [
+        100, 200, 300, 400, 500, 600,  100, 200, 300, 400, 500, 600,
+    ], 
+
+    [
+        105, 205, 305, 405, 505, 605,  105, 205, 305, 405, 505, 605,
+    ],
+    [
+        104, 204, 304, 404, 504, 604,  104, 204, 304, 404, 504, 604,
+    ],
+    [
+        103, 203, 303, 403, 503, 603,  103, 203, 303, 403, 503, 603,
+    ],
+    [
+        102, 202, 302, 402, 502, 602,  102, 202, 302, 402, 502, 602,
+    ],
+    [
+        101, 201, 301, 401, 501, 601,  101, 201, 301, 401, 501, 601,
+    ],
+    [
+        100, 200, 300, 400, 500, 600,  100, 200, 300, 400, 500, 600,
+    ], 
 ];
 
 // set/get/reset bit macros
@@ -2583,6 +2639,39 @@ fn search_position(depth: usize) {
     }
 }
 
+fn score_move(mv: u64) -> usize {
+    unsafe {
+        if get_move_capture!(mv) != 0 {
+
+            let mut target_piece = 0;
+            let mut start_piece = 0;
+            let mut end_piece = 0;
+
+            if SIDE == PieceColor::WHITE as i32 {
+                start_piece = Piece::p as usize;
+                end_piece = Piece::k as usize;
+            }else {
+                start_piece = Piece::P as usize;
+                end_piece = Piece::K as usize;
+            }
+
+            for bb_piece in start_piece..=end_piece {
+                if get_bit!(PIECE_BITBOARDS[bb_piece], get_move_target!(mv)) != 0 {
+                    target_piece = bb_piece;
+                    break;
+                }
+            }
+
+            return MVV_LVA[get_move_piece!(mv) as usize][target_piece];
+
+
+        }else {
+            return 0;
+        }
+    }
+    
+}
+
 fn evaluate() -> i32 {
     let mut score = 0;
 
@@ -2640,11 +2729,26 @@ fn evaluate() -> i32 {
 
 }
 
+fn sort_moves(move_list: &mut Vec<u64>) {
+
+    let mut move_scores = move_list.clone().iter().map(|x| score_move(*x)).collect::<Vec<usize>>();
+
+    for current_move in 0..move_list.len() {
+        for next_move in current_move+1..move_list.len() {
+            if move_scores[current_move] < move_scores[next_move] {
+                move_list.swap(current_move, next_move);
+                move_scores.swap(current_move, next_move);
+            }
+        }
+    }
+}
+
 fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     //print_board();
     unsafe{
     // increment nodes count
     NODES += 1;
+
     // evaluate position
     let evaluation = evaluate();
 
@@ -2660,7 +2764,11 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         alpha = evaluation;
     }
 
-    let legal_moves = generate_moves();
+    let mut legal_moves = generate_moves();
+
+    legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
+
+    //sort_moves(&mut legal_moves);
 
     for mv in legal_moves.iter() {
         // preserve board state
@@ -2698,7 +2806,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     
 }
 
-fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
+fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
         if depth == 0 {
             // run quiescence search
@@ -2727,9 +2835,17 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
                 };
 
                 in_check = is_square_attacked(king_square, PieceColor::WHITE as u64);
+            }
+
+            if in_check {
+                depth += 1;
             }            
 
-            let legal_moves = generate_moves();
+            let mut legal_moves = generate_moves();
+
+            legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
+
+            //sort_moves(&mut legal_moves);
 
             for mv in legal_moves.iter() {
                 let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
@@ -2760,6 +2876,7 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
                     }
                 }
             }
+
             // detecting checkmate and stalemate
             if legal_moves.len() == 0 {
                 if in_check {
@@ -2857,6 +2974,21 @@ fn main() {
     init_sliders_table(0);
 
     uci_loop(&char_pieces);
+
+    // parse_fen(TRICKY_POSITION, &char_pieces);
+    // print_board();
+    // //println!("static valuation: {}", evaluate());
+    // // let mut legal_moves = generate_moves();
+    // // legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
+
+    // // //sort_moves(&mut legal_moves);
+
+    // // for mv in legal_moves.iter() {
+    // //     println!("{} -> score: {}", get_uci_move(*mv), score_move(*mv));
+    // // }
+
+    // search_position(6);
+    
 
     
 
