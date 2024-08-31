@@ -102,7 +102,7 @@ static mut PLY: usize = 0;
 // best move so far
 static mut BEST_MOVE: u64 = 0; 
 
-// NODES searched in a give position
+// NODES searched in a given position
 
 static mut NODES: usize = 0;
 
@@ -2198,8 +2198,8 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
         } else {
             // Make sure move is the capture
             if get_move_capture!(ch_move) != 0{
-                make_move(ch_move, MOVE_TYPE::all_moves);
-                return true;
+                return make_move(ch_move, MOVE_TYPE::all_moves);
+                //return true;
             // Otherwise the move is not a capture
             }else {
                 // Don't make it
@@ -2640,11 +2640,63 @@ fn evaluate() -> i32 {
 
 }
 
+fn quiescence(mut alpha: i32, beta: i32) -> i32 {
+    unsafe{
+        // evaluate position
+    let evaluation = evaluate();
+
+    // fail-hard beta cutoff
+    if evaluation >= beta {
+        // node (move) fails high
+        return beta;
+    }
+
+    // found a better move
+    if evaluation > alpha {
+        // PV node (move)
+        alpha = evaluation;
+    }
+
+    let legal_moves = generate_moves();
+
+    for mv in legal_moves.iter() {
+        // preserve board state
+        let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+
+        // increment ply
+        PLY += 1;
+
+        make_move(*mv, MOVE_TYPE::only_captures);
+
+        let score = -quiescence(-beta, -alpha);
+
+        PLY-= 1;
+
+        take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+
+        // fail-hard beta cutoff
+        if score >= beta {
+            // node (move) fails high
+            return beta;
+        }
+
+        // found a better move
+        if score > alpha {
+            alpha = score;
+        }
+
+
+    }
+    return alpha;
+    }
+    
+}
+
 fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
     unsafe {
         if depth == 0 {
-            
-            return evaluate();
+            // run quiescence search
+            return quiescence(alpha, beta);
 
         }else {
             NODES += 1;
@@ -2678,7 +2730,7 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
 
                 PLY += 1;
 
-                make_move(*mv, MOVE_TYPE::all_moves);
+                make_move(*mv, MOVE_TYPE::only_captures);
 
                 let score = -negamax(-beta, -alpha, depth-1);
 
@@ -2800,5 +2852,8 @@ fn main() {
 
     uci_loop(&char_pieces);
 
+    // parse_fen(START_POSTITION, &char_pieces);
+    // print_board();
+    // search_position(8);
 
 }
