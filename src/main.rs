@@ -2641,6 +2641,7 @@ fn evaluate() -> i32 {
 }
 
 fn quiescence(mut alpha: i32, beta: i32) -> i32 {
+    //print_board();
     unsafe{
         // evaluate position
     let evaluation = evaluate();
@@ -2666,7 +2667,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         // increment ply
         PLY += 1;
 
-        make_move(*mv, MOVE_TYPE::only_captures);
+        if !make_move(*mv, MOVE_TYPE::only_captures) {
+            PLY -= 1;
+            continue;
+        }
 
         let score = -quiescence(-beta, -alpha);
 
@@ -2730,7 +2734,7 @@ fn negamax(mut alpha: i32, beta: i32, depth: usize) -> i32 {
 
                 PLY += 1;
 
-                make_move(*mv, MOVE_TYPE::only_captures);
+                make_move(*mv, MOVE_TYPE::all_moves);
 
                 let score = -negamax(-beta, -alpha, depth-1);
 
@@ -2852,8 +2856,6 @@ fn main() {
 
     uci_loop(&char_pieces);
 
-    // parse_fen(START_POSTITION, &char_pieces);
-    // print_board();
-    // search_position(8);
+    
 
 }
