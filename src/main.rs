@@ -2668,6 +2668,11 @@ fn search_position(depth: usize) {
         FOLLOW_PV = 0;
         SCORE_PV = 0;
     }
+    // define initial alpha beta bounds
+    let mut alpha = -50000;
+    let mut beta = 50000;
+
+
 
     // iterative deepening 
     for current_depth in 1..=depth {
@@ -2677,7 +2682,20 @@ fn search_position(depth: usize) {
         unsafe {
             FOLLOW_PV = 1;
         }
-        let score = negamax(-50000, 50000, current_depth);
+
+        let score = negamax(alpha, beta, current_depth);
+
+        
+        // // we fell outside the window, so try again with a full-width window (and the same depth)
+        // if (score <= alpha) || (score >= beta) {
+        //     alpha = -50000;
+        //     beta = 50000;
+        //     continue;
+        // }
+
+        // // set up the window for the next iteration
+        // alpha -= 50;
+        // beta += 50;
 
         unsafe {
 
@@ -2945,14 +2963,14 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
             if SIDE == PieceColor::WHITE as i32 {
                 let king_square = match index_lsb(PIECE_BITBOARDS[Piece::K as usize]){
                     Ok(val) => val as u64,
-                    Err(_) => panic!(),
+                    Err(e) => panic!("error: {:?}", e),
                 };
 
                 in_check = is_square_attacked(king_square, PieceColor::BLACK as u64);
             }else {
                 let king_square = match index_lsb(PIECE_BITBOARDS[Piece::k as usize]){
                     Ok(val) => val as u64,
-                    Err(_) => panic!(),
+                    Err(e) => panic!("error: {:?}", e),
                 };
 
                 in_check = is_square_attacked(king_square, PieceColor::WHITE as u64);
@@ -2960,7 +2978,25 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
             if in_check {
                 depth += 1;
-            }            
+            }   
+
+            // null move pruning
+            if depth >= 3 && !in_check && PLY != 0 {
+                let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+
+                SIDE ^= 1;
+
+                ENPASSANT = BoardSquare::no_sq as u32;
+
+                let score = -negamax(-beta, -beta+1, depth-1-2);
+
+                take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+
+                if score >= beta {
+                    return beta;
+                }
+            }
+
 
             let mut legal_moves = generate_moves();
 
@@ -2984,51 +3020,44 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 let mut score = 0;
                 // if we hit PV node 
-                if found_pv {
-                    /* Once you've found a move with a score that is between alpha and beta,
-                    the rest of the moves are searched with the goal of proving that they are all bad.
-                    It's possible to do this a bit faster than a search that worries that one
-                    of the remaining moves might be good. */
-                    score = -negamax(-alpha-1, -alpha, depth-1);
+                if moves_searched == 0 {
 
-                    /* If the algorithm finds out that it was wrong, and that one of the
-                    subsequent moves was better than the first PV move, it has to search again,
-                    in the normal alpha-beta manner.  This happens sometimes, and it's a waste of time,
-                    but generally not often enough to counteract the savings gained from doing the
-                    "bad move proof" search referred to earlier. */
-                    if score > alpha && score < beta {
-                        score = -negamax(-beta, -alpha, depth-1)
-                    }
+                    score = -negamax(-beta, -alpha, depth - 1);
+                    
                 }else{
                     // full depth search
-                    if moves_searched == 0 {
-                        score = -negamax(-beta, -alpha, depth-1);
-                    // late move reduction (LMR)
-                    }else{
-                        // conditions to consider LMR
-                        if moves_searched >= FULL_DEPTH_MOVE 
-                        && depth >= REDUCTION_LIMIT 
-                        && in_check == false
-                        && get_move_capture!(*mv) == 0 
-                        && get_move_promoted!(*mv) == 0 
-                        {
-                            score = -negamax(-alpha - 1, -alpha, depth - 2);
-                        }else
-                        {
-                            // hack to ensure that full-depth search is done
-                            score = alpha +1;
-                        }
-                        // if found a better move during LMR
-                        if score > alpha {
-                            // re-search at full depth but with narrowed score bandwith
-                            score = -negamax(-alpha - 1, -alpha, depth-1);
+                    
+                    // conditions to consider LMR
+                    if moves_searched >= FULL_DEPTH_MOVE 
+                    && depth >= REDUCTION_LIMIT 
+                    && in_check == false
+                    && get_move_capture!(*mv) == 0 
+                    && get_move_promoted!(*mv) == 0 
+                    {
+                        score = -negamax(-alpha - 1, -alpha, depth - 2);
 
-                            // if LMR fails re-search at full depth and full score bandwith
-                            if score > alpha && score < beta {
-                                score = -negamax(-beta, -alpha, depth-1);
-                            }
+                    }else{
+                        // hack to ensure that full-depth search is done
+                        score = alpha +1;
+                    }
+                    // principle variation search PVS
+                    if score > alpha {
+                        // /* Once you've found a move with a score that is between alpha and beta,
+                        // the rest of the moves are searched with the goal of proving that they are all bad.
+                        // It's possible to do this a bit faster than a search that worries that one
+                        // of the remaining moves might be good. */
+                        score = -negamax(-alpha - 1, -alpha, depth-1);
+
+                        // /* If the algorithm finds out that it was wrong, and that one of the
+                        // subsequent moves was better than the first PV move, it has to search again,
+                        // in the normal alpha-beta manner.  This happens sometimes, and it's a waste of time,
+                        // but generally not often enough to counteract the savings gained from doing the
+                        // "bad move proof" search referred to earlier. */
+                        if score > alpha && score < beta {
+                            score = -negamax(-beta, -alpha, depth-1);
                         }
                     }
+                    
                 }
 
                 PLY -=1;
@@ -3122,7 +3151,7 @@ fn parse_go(command: String) {
         }
     // different time controls placeholder
     }else {
-        let depth = 6;
+        let depth = 8;
         search_position(depth);
 
     }
@@ -3181,13 +3210,13 @@ fn main() {
 
     uci_loop(&char_pieces);
 
-    // parse_fen(TRICKY_POSITION, &char_pieces);
+    // parse_fen(START_POSTITION, &char_pieces);
     
 
 
     // print_board();
 
-    // search_position(7);
+    // search_position(10);
     
 
     
