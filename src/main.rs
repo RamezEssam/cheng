@@ -3050,15 +3050,15 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    //uci_loop(&char_pieces);
+    uci_loop(&char_pieces);
 
-    parse_fen(TRICKY_POSITION, &char_pieces);
+    // parse_fen(TRICKY_POSITION, &char_pieces);
     
 
 
-    print_board();
+    // print_board();
 
-    search_position(6);
+    // search_position(6);
     
 
     
