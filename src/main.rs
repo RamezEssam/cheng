@@ -2692,8 +2692,9 @@ fn evaluate() -> i32 {
                     Ok(val) => val,
                     Err(_) => panic!(),
                 };
-                // score material weights
                 
+                // score material weights
+                score += MATERIAL_SCORE[bb_piece];
 
                 // score positional piece scores
                 match bb_piece {
@@ -2973,21 +2974,12 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    uci_loop(&char_pieces);
+    //uci_loop(&char_pieces);
 
-    // parse_fen(TRICKY_POSITION, &char_pieces);
-    // print_board();
-    // //println!("static valuation: {}", evaluate());
-    // // let mut legal_moves = generate_moves();
-    // // legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
+    parse_fen(TRICKY_POSITION, &char_pieces);
+    print_board();
 
-    // // //sort_moves(&mut legal_moves);
-
-    // // for mv in legal_moves.iter() {
-    // //     println!("{} -> score: {}", get_uci_move(*mv), score_move(*mv));
-    // // }
-
-    // search_position(6);
+    search_position(6);
     
 
     
