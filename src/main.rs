@@ -258,6 +258,41 @@ static MVV_LVA: [[usize; 12]; 12] = [
     ], 
 ];
 
+// Killer & History moves
+
+// killer moves [id][ply]
+static mut KILLER_MOVES: [[usize; 64];2] = [[0; 64]; 2];
+// history moves [piece][square]
+static mut HISTORY_MOVES: [[usize; 64];12] = [[0; 64]; 12];
+
+/*
+      ================================
+            Triangular PV table
+      --------------------------------
+        PV line: e2e4 e7e5 g1f3 b8c6
+      ================================
+
+           0    1    2    3    4    5
+      
+      0    m1   m2   m3   m4   m5   m6
+      
+      1    0    m2   m3   m4   m5   m6 
+      
+      2    0    0    m3   m4   m5   m6
+      
+      3    0    0    0    m4   m5   m6
+       
+      4    0    0    0    0    m5   m6
+      
+      5    0    0    0    0    0    m6
+*/
+
+// PV length
+static mut PV_LENGTH: [u64; 64] = [0; 64];
+
+// PV table
+static mut PV_TABLE: [[u64; 64]; 64] = [[0; 64]; 64];
+
 // set/get/reset bit macros
 #[macro_export]
 macro_rules! get_bit {
@@ -2538,9 +2573,6 @@ fn is_king_in_check(king_source_square: u64, king_target_square: u64, king_color
 fn parse_move(str_move: &str) -> Result<u64, Error>{
     let legal_moves = generate_moves();
 
-    //let source_square = (str_move.chars().nth(0).unwrap() as u32 - 'a' as u32) + (8 - (str_move.chars().nth(1).unwrap() as u32 - '0' as u32)) * 8;
-    //let target_square = (str_move.chars().nth(2).unwrap() as u32 - 'a' as u32) + (8 - (str_move.chars().nth(3).unwrap() as u32 - '0' as u32)) * 8;
-
     for mv in legal_moves {
         let legal_str_move = get_uci_move(mv);
 
@@ -2622,7 +2654,13 @@ fn search_position(depth: usize) {
     unsafe {
         let best_move = BEST_MOVE;
 
-        println!("info score cp {} depth {} nodes {}", score, depth, NODES);
+        print!("info score cp {} depth {} nodes {} pv ", score, depth, NODES);
+
+        for i in 0..PV_LENGTH[0] as usize {
+            print!("{}", get_uci_move(PV_TABLE[0][i]));
+            print!(" ");
+        }
+        println!();
 
         if get_move_promoted!(best_move) != 0 {
             println!("bestmove {}{}{}",
@@ -2662,11 +2700,20 @@ fn score_move(mv: u64) -> usize {
                 }
             }
 
-            return MVV_LVA[get_move_piece!(mv) as usize][target_piece];
+            return MVV_LVA[get_move_piece!(mv) as usize][target_piece] +10000;
 
 
         }else {
-            return 0;
+            // score 1st killer move
+            if KILLER_MOVES[0][PLY] == mv as usize {
+                return 9000;
+            // score 2nd killer move
+            }else if KILLER_MOVES[1][PLY] == mv as usize {
+                return 8000;
+            // score history move
+            }else {
+                return HISTORY_MOVES[get_move_piece!(mv) as usize][get_move_target!(mv) as usize];
+            }
         }
     }
     
@@ -2722,9 +2769,9 @@ fn evaluate() -> i32 {
 
     unsafe {
         if SIDE == PieceColor::WHITE as i32 {
-            score
+            score 
         }else {
-            -score
+            -score 
         }
     }
 
@@ -2809,6 +2856,9 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
+        // init PV length
+        PV_LENGTH[PLY] = PLY as u64;
+
         if depth == 0 {
             // run quiescence search
             return quiescence(alpha, beta);
@@ -2863,13 +2913,39 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 // fail-hard beta cutoff
                 if score >= beta {
+                    // on quiet moves
+                    if get_move_capture!(*mv) == 0 {
+                        // store killer moves
+                        KILLER_MOVES[1][PLY] = KILLER_MOVES[0][PLY];
+                        KILLER_MOVES[0][PLY] = *mv as usize;
+                    } 
+
+                    
                     return beta;
                 }
 
                 // found a better move
                 if score > alpha {
+                    // on quiet moves
+                    if get_move_capture!(*mv) == 0 {
+                        // store history moves
+                        HISTORY_MOVES[get_move_piece!(*mv) as usize][get_move_target!(*mv) as usize] += depth;
+                    }
+                    
                     // PV node (move)
                     alpha = score;
+
+                    // write PV move
+                    PV_TABLE[PLY][PLY] = *mv;
+
+                    // loop over the next ply
+                    for next_ply in PLY +1 .. PV_LENGTH[PLY +1] as usize {
+                        // copy move from deeper ply into a current ply's line
+                        PV_TABLE[PLY][next_ply] = PV_TABLE[PLY+1][next_ply];
+                    }
+
+                    // adjust PV length
+                    PV_LENGTH[PLY] = PV_LENGTH[PLY+1];
 
                     if PLY == 0 {
                         // associate best move with the best score
@@ -2974,12 +3050,15 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    uci_loop(&char_pieces);
+    //uci_loop(&char_pieces);
 
-    // parse_fen(TRICKY_POSITION, &char_pieces);
-    // print_board();
+    parse_fen(TRICKY_POSITION, &char_pieces);
+    
 
-    // search_position(6);
+
+    print_board();
+
+    search_position(6);
     
 
     
