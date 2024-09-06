@@ -293,6 +293,15 @@ static mut PV_LENGTH: [u64; 64] = [0; 64];
 // PV table
 static mut PV_TABLE: [[u64; 64]; 64] = [[0; 64]; 64];
 
+static mut FOLLOW_PV: u64 = 0;
+
+static mut SCORE_PV: u64 = 0;
+
+// Late move reduction constants
+
+static FULL_DEPTH_MOVE: usize = 4;
+static REDUCTION_LIMIT: usize = 3;
+
 // set/get/reset bit macros
 #[macro_export]
 macro_rules! get_bit {
@@ -2648,30 +2657,51 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 }
 
 fn search_position(depth: usize) {
-    // find best move within a given position
-    let score = negamax(-50000, 50000, depth);
 
+    // clear helper data structures for search
     unsafe {
-        let best_move = BEST_MOVE;
+        NODES = 0;
+        KILLER_MOVES = [[0; 64]; 2];
+        HISTORY_MOVES = [[0; 64]; 12];
+        PV_TABLE = [[0; 64]; 64];
+        PV_LENGTH = [0; 64];
+        FOLLOW_PV = 0;
+        SCORE_PV = 0;
+    }
 
-        print!("info score cp {} depth {} nodes {} pv ", score, depth, NODES);
+    // iterative deepening 
+    for current_depth in 1..=depth {
+        // find best move within a given position
 
-        for i in 0..PV_LENGTH[0] as usize {
-            print!("{}", get_uci_move(PV_TABLE[0][i]));
-            print!(" ");
+        // enable follow pv flag
+        unsafe {
+            FOLLOW_PV = 1;
         }
-        println!();
+        let score = negamax(-50000, 50000, current_depth);
 
-        if get_move_promoted!(best_move) != 0 {
+        unsafe {
+
+            print!("info score cp {} depth {} nodes {} pv ", score, current_depth, NODES);
+
+            for i in 0..PV_LENGTH[0] as usize {
+                print!("{}", get_uci_move(PV_TABLE[0][i]));
+                print!(" ");
+            }
+            println!();
+        }
+    }
+    
+    unsafe {
+        if get_move_promoted!(BEST_MOVE) != 0 {
             println!("bestmove {}{}{}",
-            SQUARE_TO_COORD[get_move_source!(best_move) as usize],
-            SQUARE_TO_COORD[get_move_target!(best_move) as usize],
-            ASCII_PIECES[get_move_promoted!(best_move) as usize]
+            SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+            SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+            ASCII_PIECES[get_move_promoted!(BEST_MOVE) as usize]
             );
         }else {
             println!("bestmove {}{}",
-            SQUARE_TO_COORD[get_move_source!(best_move) as usize],
-            SQUARE_TO_COORD[get_move_target!(best_move) as usize],
+            SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+            SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
             );
         }
     }
@@ -2679,6 +2709,16 @@ fn search_position(depth: usize) {
 
 fn score_move(mv: u64) -> usize {
     unsafe {
+        // if PV move scoring is enabled 
+        if SCORE_PV != 0 {
+            // make sure we are dealing with the PV move
+            if PV_TABLE[0][PLY] == mv {
+                SCORE_PV = 0;
+
+                return 20000;
+            }
+        }
+
         if get_move_capture!(mv) != 0 {
 
             let mut target_piece = 0;
@@ -2717,6 +2757,26 @@ fn score_move(mv: u64) -> usize {
         }
     }
     
+}
+
+
+fn enable_pv_scoring(move_list: &Vec<u64>) {
+    unsafe {
+        // disable following PV
+        FOLLOW_PV = 0;
+
+        for mv in move_list {
+            // make sure we hit PV move
+            if PV_TABLE[0][PLY] == *mv {
+                // enable move scoring
+                SCORE_PV = 1;
+
+                // enable following PV
+                FOLLOW_PV = 1;
+            }
+        }
+
+    }
 }
 
 fn evaluate() -> i32 {
@@ -2854,8 +2914,13 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     
 }
 
+
+// negamax alpha beta search
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
+        // define find PV node variable
+        let mut found_pv = false;
+
         // init PV length
         PV_LENGTH[PLY] = PLY as u64;
 
@@ -2864,6 +2929,11 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
             return quiescence(alpha, beta);
 
         }else {
+            // Check if PLY reached the maximum ply allowed by PV_LENGTH and PV_TABLE
+            if PLY > 63 {
+                return evaluate();
+            }
+
             NODES += 1;
 
             let mut best_sofar: u64 = 0;
@@ -2894,9 +2964,16 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
             let mut legal_moves = generate_moves();
 
+            // if we are following principle variation line
+            if FOLLOW_PV != 0 {
+                // enable PV move scoring
+                enable_pv_scoring(&legal_moves);
+            }
+
             legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
 
-            //sort_moves(&mut legal_moves);
+            let mut moves_searched = 0;
+
 
             for mv in legal_moves.iter() {
                 let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
@@ -2905,11 +2982,60 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 make_move(*mv, MOVE_TYPE::all_moves);
 
-                let score = -negamax(-beta, -alpha, depth-1);
+                let mut score = 0;
+                // if we hit PV node 
+                if found_pv {
+                    /* Once you've found a move with a score that is between alpha and beta,
+                    the rest of the moves are searched with the goal of proving that they are all bad.
+                    It's possible to do this a bit faster than a search that worries that one
+                    of the remaining moves might be good. */
+                    score = -negamax(-alpha-1, -alpha, depth-1);
+
+                    /* If the algorithm finds out that it was wrong, and that one of the
+                    subsequent moves was better than the first PV move, it has to search again,
+                    in the normal alpha-beta manner.  This happens sometimes, and it's a waste of time,
+                    but generally not often enough to counteract the savings gained from doing the
+                    "bad move proof" search referred to earlier. */
+                    if score > alpha && score < beta {
+                        score = -negamax(-beta, -alpha, depth-1)
+                    }
+                }else{
+                    // full depth search
+                    if moves_searched == 0 {
+                        score = -negamax(-beta, -alpha, depth-1);
+                    // late move reduction (LMR)
+                    }else{
+                        // conditions to consider LMR
+                        if moves_searched >= FULL_DEPTH_MOVE 
+                        && depth >= REDUCTION_LIMIT 
+                        && in_check == false
+                        && get_move_capture!(*mv) == 0 
+                        && get_move_promoted!(*mv) == 0 
+                        {
+                            score = -negamax(-alpha - 1, -alpha, depth - 2);
+                        }else
+                        {
+                            // hack to ensure that full-depth search is done
+                            score = alpha +1;
+                        }
+                        // if found a better move during LMR
+                        if score > alpha {
+                            // re-search at full depth but with narrowed score bandwith
+                            score = -negamax(-alpha - 1, -alpha, depth-1);
+
+                            // if LMR fails re-search at full depth and full score bandwith
+                            if score > alpha && score < beta {
+                                score = -negamax(-beta, -alpha, depth-1);
+                            }
+                        }
+                    }
+                }
 
                 PLY -=1;
 
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+
+                moves_searched += 1;
 
                 // fail-hard beta cutoff
                 if score >= beta {
@@ -2934,6 +3060,9 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                     
                     // PV node (move)
                     alpha = score;
+
+                    // enable found pv flag
+                    found_pv = true;
 
                     // write PV move
                     PV_TABLE[PLY][PLY] = *mv;
@@ -3058,7 +3187,7 @@ fn main() {
 
     // print_board();
 
-    // search_position(6);
+    // search_position(7);
     
 
     
