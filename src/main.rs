@@ -2784,12 +2784,6 @@ fn search_position(depth: usize) {
     for current_depth in 1..=depth {
         // find best move within a given position
 
-        unsafe {
-            if STOPPED == 1 {
-                break;
-            }
-        }
-
         // enable follow pv flag
         unsafe {
             FOLLOW_PV = 1;
@@ -2818,6 +2812,12 @@ fn search_position(depth: usize) {
                 print!(" ");
             }
             println!();
+        }
+
+        unsafe {
+            if STOPPED == 1 {
+                break;
+            }
         }
     }
     
@@ -3032,7 +3032,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
         if STOPPED == 1 {
-            return 0;
+            return score;
         }
 
         // fail-hard beta cutoff
