@@ -1,3 +1,4 @@
+use core::time;
 use std::collections::HashMap;
 use std::i32;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3297,9 +3298,6 @@ fn parse_go(command: String) {
                 Ok(val) => val as i32,
                 Err(e) => panic!("unknown value for depth: {}", e),
             };
-
-            // search position
-            //search_position(depth as usize);
         }
     // infinite search
     }
@@ -3310,52 +3308,62 @@ fn parse_go(command: String) {
         time_controls = time_controls.trim().to_string();
 
         let time_controls = time_controls.split(" ").collect::<Vec<&str>>();
-        let wtime = match time_controls[1].parse::<usize>() {
-            Ok(val) => val,
-            Err(e) => panic!("unknown value for wtime: {}", e),
-        };
 
-        unsafe {
-            if SIDE == PieceColor::WHITE as i32 {
-                TIME = wtime as i64;
-            }   
-        }
-
-        let btime = match time_controls[3].parse::<usize>() {
-            Ok(val) => val,
-            Err(e) => panic!("unknown value for btime: {}", e),
-        };
-
-        unsafe {
-            if SIDE == PieceColor::BLACK as i32 {
-                TIME = btime as i64;
+        if time_controls.len() >= 2 {
+            let wtime = match time_controls[1].parse::<usize>() {
+                Ok(val) => val,
+                Err(e) => panic!("unknown value for wtime: {}", e),
+            };
+    
+            unsafe {
+                if SIDE == PieceColor::WHITE as i32 {
+                    TIME = wtime as i64;
+                }   
             }
-            
         }
-
-        let winc = match time_controls[5].parse::<usize>() {
-            Ok(val) => val,
-            Err(e) => panic!("unknown value for winc: {}", e),
-        };
-
-        unsafe {
-            if SIDE == PieceColor::WHITE as i32 {
-                INC = winc as i64;
+        
+        if time_controls.len() >= 4 {
+            let btime = match time_controls[3].parse::<usize>() {
+                Ok(val) => val,
+                Err(e) => panic!("unknown value for btime: {}", e),
+            };
+    
+            unsafe {
+                if SIDE == PieceColor::BLACK as i32 {
+                    TIME = btime as i64;
+                }
+                
             }
-            
         }
-
-        let binc = match time_controls[7].parse::<usize>() {
-            Ok(val) => val,
-            Err(e) => panic!("unknown value for binc: {}", e),
-        };
-
-        unsafe {
-            if SIDE == PieceColor::BLACK as i32 {
-                INC = binc as i64;
+        
+        if time_controls.len() >= 6 {
+            let winc = match time_controls[5].parse::<usize>() {
+                Ok(val) => val,
+                Err(e) => panic!("unknown value for winc: {}", e),
+            };
+    
+            unsafe {
+                if SIDE == PieceColor::WHITE as i32 {
+                    INC = winc as i64;
+                }
+                
             }
-            
         }
+        
+        if time_controls.len() >= 8 {
+            let binc = match time_controls[7].parse::<usize>() {
+                Ok(val) => val,
+                Err(e) => panic!("unknown value for binc: {}", e),
+            };
+    
+            unsafe {
+                if SIDE == PieceColor::BLACK as i32 {
+                    INC = binc as i64;
+                }
+                
+            }
+        }
+        
 
 
     }
