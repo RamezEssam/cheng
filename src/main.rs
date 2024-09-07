@@ -2978,8 +2978,12 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     unsafe{
     // every 2047 nodes
-    if (NODES % 1000) == 0{
+    if (NODES % 2047) == 0{
         communicate();
+
+        if STOPPED == 1 {
+            return evaluate();
+        }
     }
     // increment nodes count
     NODES += 1;
@@ -3025,9 +3029,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-        if STOPPED == 1 {
-            return evaluate();
-        }
+        
 
         // fail-hard beta cutoff
         if score >= beta {
@@ -3050,8 +3052,12 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
         // // every 2047 nodes
-        if (NODES % 1000) == 0 {
+        if (NODES % 2047) == 0 {
             communicate();
+
+            if STOPPED == 1 {
+                return evaluate();
+            }
         }
 
         // define find PV node variable
@@ -3185,9 +3191,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
                 
-                if STOPPED == 1 {
-                    return evaluate();
-                }
+                
 
                 moves_searched += 1;
 
