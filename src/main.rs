@@ -2978,7 +2978,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     unsafe{
     // every 2047 nodes
-    if (NODES % 2047) == 0{
+    if (NODES % 1000) == 0{
         communicate();
     }
     // increment nodes count
@@ -3005,6 +3005,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     //sort_moves(&mut legal_moves);
 
+    if STOPPED == 1 {
+        return evaluate();
+    }
+
     for mv in legal_moves.iter() {
         // preserve board state
         let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
@@ -3023,9 +3027,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-        if STOPPED == 1 {
-            return 0;
-        }
+        
 
         // fail-hard beta cutoff
         if score >= beta {
@@ -3048,7 +3050,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
         // // every 2047 nodes
-        if (NODES % 2047) == 0 {
+        if (NODES % 1000) == 0 {
             communicate();
         }
 
@@ -3126,6 +3128,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
             let mut moves_searched = 0;
 
+            if STOPPED == 1 {
+                return evaluate();
+            }
+
 
             for mv in legal_moves.iter() {
                 let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
@@ -3180,9 +3186,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-                if STOPPED == 1 {
-                    return 0;
-                }
+                
                 
 
                 moves_searched += 1;
@@ -3456,19 +3460,19 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    uci_loop(&char_pieces);
+    //uci_loop(&char_pieces);
 
-    // parse_fen(START_POSTITION, &char_pieces);
-    
+    parse_fen(START_POSTITION, &char_pieces);
+
+    print_board();
+
+    parse_position("position startpos moves e2e4 b8c6 b1c3 e7e5".to_string(), &char_pieces);
+
+    parse_go("go wtime 280447 btime 280432 winc 2000 binc 2000".to_string());
+
+    print_board();
 
 
-    // print_board();
-
-    // parse_position("position startpos moves e2e4 b8c6 b1c3 e7e5".to_string(), &char_pieces);
-
-    // print_board();
-
-    // parse_go("go wtime 280447 btime 280432 winc 2000 binc 2000".to_string())
     
 
     
