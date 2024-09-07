@@ -3454,19 +3454,19 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    //uci_loop(&char_pieces);
+    uci_loop(&char_pieces);
 
-    parse_fen(START_POSTITION, &char_pieces);
+    // parse_fen(START_POSTITION, &char_pieces);
     
 
 
-    print_board();
+    // print_board();
 
-    parse_position("position startpos moves e2e4 b8c6 b1c3 e7e5".to_string(), &char_pieces);
+    // parse_position("position startpos moves e2e4 b8c6 b1c3 e7e5".to_string(), &char_pieces);
 
-    print_board();
+    // print_board();
 
-    parse_go("go wtime 280447 btime 280432 winc 2000 binc 2000".to_string())
+    // parse_go("go wtime 280447 btime 280432 winc 2000 binc 2000".to_string())
     
 
     
