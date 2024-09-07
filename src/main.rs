@@ -3036,7 +3036,13 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
         if STOPPED == 1 {
-            return alpha;
+            if score >= beta {
+                return beta;
+            }
+
+            if score > alpha {
+                return score;
+            }
         }
 
         // fail-hard beta cutoff
@@ -3197,7 +3203,12 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
                 if STOPPED == 1 {
-                    return alpha;
+                    if score >= beta {
+                        return beta;
+                    }
+                    if score > alpha {
+                        return score;
+                    }
                 }
                 
 
