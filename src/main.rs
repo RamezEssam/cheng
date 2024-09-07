@@ -3446,15 +3446,15 @@ fn main() {
     init_sliders_table(1);
     init_sliders_table(0);
 
-    //uci_loop(&char_pieces);
+    uci_loop(&char_pieces);
 
-    parse_fen(START_POSTITION, &char_pieces);
+    // parse_fen(START_POSTITION, &char_pieces);
     
 
 
-    print_board();
+    // print_board();
 
-    parse_go("go wtime 301362 btime 315220 winc 0 binc 0".to_string())
+    // parse_go("go wtime 301362 btime 315220 winc 0 binc 0".to_string())
     
 
     
