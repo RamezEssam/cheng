@@ -507,10 +507,12 @@ fn read_input() {
         if in_buffer.len() > 0 {
             if in_buffer.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "quit"{
                 unsafe {
+                    //in_buffer.clear();
                     QUIT = 1;
                 }
             }else if in_buffer.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "stop" {
                 unsafe {
+                    //in_buffer.clear();
                     QUIT = 1;
                 }
             }
@@ -2778,10 +2780,15 @@ fn search_position(depth: usize) {
     let mut alpha = -50000;
     let mut beta = 50000;
 
-
+    
 
     // iterative deepening 
     for current_depth in 1..=depth {
+        unsafe {
+            if STOPPED == 1 {
+                break;
+            }
+        }
         // find best move within a given position
 
         // enable follow pv flag
@@ -2814,11 +2821,7 @@ fn search_position(depth: usize) {
             println!();
         }
 
-        unsafe {
-            if STOPPED == 1 {
-                break;
-            }
-        }
+        
     }
     
     unsafe {
@@ -3265,7 +3268,17 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 // parse UCI "go" command
 fn parse_go(command: String) {
 
-    //let subcommand = command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>();
+    unsafe {
+        QUIT = 0;
+        MOVESTOGO = 30;
+        MOVETIME = -1;
+        TIME= -1;
+        INC = 0;
+        STARTTIME = 0;
+        STOPTIME = 0;
+        TIMESET= 0;
+        STOPPED= 0;
+    }
 
     let mut depth = -1;
 
