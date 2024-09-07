@@ -3034,9 +3034,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-        if STOPPED == 1 {
-            return score;
-        }
+        
 
         // fail-hard beta cutoff
         if score >= beta {
@@ -3047,6 +3045,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         // found a better move
         if score > alpha {
             alpha = score;
+        }
+
+        if STOPPED == 1 {
+            return alpha;
         }
 
 
@@ -3193,9 +3195,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-                if STOPPED == 1 {
-                    return score;
-                }
+                
 
                 moves_searched += 1;
 
@@ -3243,6 +3243,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                         best_sofar = *mv;
                     }
                 }
+
+                if STOPPED == 1 {
+                    return alpha;
+                }
             }
 
             // detecting checkmate and stalemate
@@ -3259,6 +3263,8 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 BEST_MOVE = best_sofar;
 
             }
+
+            
 
             return alpha;
         }
