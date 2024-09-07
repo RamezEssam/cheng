@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::i32;
-use std::mem::swap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
-//use rand::Rng;
 
 
 #[derive(Debug)]
@@ -302,6 +300,34 @@ static mut SCORE_PV: u64 = 0;
 static FULL_DEPTH_MOVE: usize = 4;
 static REDUCTION_LIMIT: usize = 3;
 
+/**********************************\
+ ==================================
+ 
+       Time controls variables
+ 
+ ==================================
+\**********************************/
+// exit from engine flag
+static mut QUIT: u64 = 0;
+// UCI "movestogo" command moves counter
+static mut MOVESTOGO: u64 = 30;
+// UCI "movetime" command time counter
+static mut MOVETIME: i64 = -1;
+// UCI "time" command holder (ms)
+static mut TIME: i64 = -1;
+// UCI "inc" command's time increment holder
+static mut INC: i64 = 0;
+// UCI "starttime" command time holder
+static mut STARTTIME: u64 = 0;
+// UCI "stoptime" command time holder
+static mut STOPTIME: u64 = 0;
+// variable to flag time control availability
+static mut TIMESET: u64 = 0;
+// variable to flag when the time is up
+static mut STOPPED: u64 = 0;
+
+
+
 // set/get/reset bit macros
 #[macro_export]
 macro_rules! get_bit {
@@ -425,6 +451,88 @@ fn get_random_u32_number() -> u32{
         RANDOM_SEED = number;
         number
     }  
+}
+
+#[cfg(unix)]
+fn input_waiting() -> bool {
+    use libc::{poll, pollfd, POLLIN};
+    use std::os::unix::io::AsRawFd;
+
+    let stdin_fd = io::stdin().as_raw_fd();
+    let mut fds = [pollfd {
+        fd: stdin_fd,
+        events: POLLIN,
+        revents: 0,
+    }];
+
+    let timeout = 0; // Non-blocking, immediate return
+    let res = unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, timeout) };
+
+    res > 0 && (fds[0].revents & POLLIN) != 0
+}
+
+#[cfg(windows)]
+fn input_waiting() -> bool {
+    use std::mem;
+    use std::ptr;
+    use std::os::windows::io::AsRawHandle;
+    use winapi::um::consoleapi::GetNumberOfConsoleInputEvents;
+    use winapi::um::processenv::GetStdHandle;
+    use winapi::um::winbase::STD_INPUT_HANDLE;
+    use winapi::um::winnt::HANDLE;
+
+    unsafe {
+        let handle: HANDLE = GetStdHandle(STD_INPUT_HANDLE);
+        let mut events: u32 = 0;
+        let result = GetNumberOfConsoleInputEvents(handle, &mut events);
+
+        if result == 0 {
+            // An error occurred
+            false
+        } else {
+            // If there are more than 1 event, input is available
+            events > 1
+        }
+    }
+}
+// read GUI/user input
+fn read_input() {
+    let mut in_buffer = String::new();
+
+    if input_waiting() {
+        unsafe{
+            STOPPED = 1;
+        }
+
+        io::stdin().read_line(&mut in_buffer).expect("failed to read line");
+        in_buffer = in_buffer.trim().to_string();
+
+        if in_buffer.len() > 0 {
+            if in_buffer.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "quit"{
+                unsafe {
+                    QUIT = 1;
+                }
+            }else if in_buffer.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "stop" {
+                unsafe {
+                    QUIT = 1;
+                }
+            }
+        }
+
+        
+    }
+}
+
+// a bridge function to interact between search and GUI input
+fn communicate() {
+    // if time is up break here
+    unsafe {
+        if TIMESET == 1 && get_time_ms() > STOPTIME as u128 {
+            STOPPED = 1;
+        }
+    }
+
+    read_input();
 }
 
 fn get_random_u64_number() -> u64 {
@@ -2667,6 +2775,7 @@ fn search_position(depth: usize) {
         PV_LENGTH = [0; 64];
         FOLLOW_PV = 0;
         SCORE_PV = 0;
+        STOPPED = 0;
     }
     // define initial alpha beta bounds
     let mut alpha = -50000;
@@ -2677,6 +2786,12 @@ fn search_position(depth: usize) {
     // iterative deepening 
     for current_depth in 1..=depth {
         // find best move within a given position
+
+        unsafe {
+            if STOPPED == 1 {
+                break;
+            }
+        }
 
         // enable follow pv flag
         unsafe {
@@ -2710,6 +2825,7 @@ fn search_position(depth: usize) {
     }
     
     unsafe {
+        BEST_MOVE = PV_TABLE[0][0];
         if get_move_promoted!(BEST_MOVE) != 0 {
             println!("bestmove {}{}{}",
             SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
@@ -2870,8 +2986,12 @@ fn sort_moves(move_list: &mut Vec<u64>) {
 }
 
 fn quiescence(mut alpha: i32, beta: i32) -> i32 {
-    //print_board();
+
     unsafe{
+    // every 2047 nodes
+    if (NODES & 2047) == 0{
+        communicate();
+    }
     // increment nodes count
     NODES += 1;
 
@@ -2914,6 +3034,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
+        if STOPPED == 1 {
+            return 0;
+        }
+
         // fail-hard beta cutoff
         if score >= beta {
             // node (move) fails high
@@ -2936,6 +3060,11 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 // negamax alpha beta search
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
+        // every 2047 nodes
+        if (NODES & 2047) == 0{
+            communicate();
+        }
+
         // define find PV node variable
         let mut found_pv = false;
 
@@ -3064,6 +3193,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
+                if STOPPED == 1 {
+                    return 0;
+                }
+
                 moves_searched += 1;
 
                 // fail-hard beta cutoff
@@ -3135,26 +3268,134 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 // parse UCI "go" command
 fn parse_go(command: String) {
 
-    let subcommand = command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>();
+    //let subcommand = command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>();
 
-    if subcommand == "depth" {
+    let mut depth = -1;
+
+    if command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>() == "depth" {
         let current_depth = command.chars().skip(9).collect::<Vec<char>>().iter().collect::<String>();
 
         if current_depth.chars().count() > 0 {
-            let depth = match current_depth.parse::<usize>() {
-                Ok(val) => val,
+            depth = match current_depth.parse::<usize>() {
+                Ok(val) => val as i32,
                 Err(e) => panic!("unknown value for depth: {}", e),
             };
 
             // search position
-            search_position(depth);
+            //search_position(depth as usize);
         }
-    // different time controls placeholder
-    }else {
-        let depth = 8;
-        search_position(depth);
+    // infinite search
+    }
+    if command.chars().skip(3).take(8).collect::<Vec<char>>().iter().collect::<String>() == "infinite"{
+
+    }if command.chars().skip(3).take(5).collect::<Vec<char>>().iter().collect::<String>() == "wtime" {
+        let mut time_controls = command.chars().skip(3).collect::<Vec<char>>().iter().collect::<String>();
+        time_controls = time_controls.trim().to_string();
+
+        let time_controls = time_controls.split(" ").collect::<Vec<&str>>();
+        let wtime = match time_controls[1].parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for wtime: {}", e),
+        };
+
+        unsafe {
+            if SIDE == PieceColor::WHITE as i32 {
+                TIME = wtime as i64;
+            }   
+        }
+
+        let btime = match time_controls[3].parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for btime: {}", e),
+        };
+
+        unsafe {
+            if SIDE == PieceColor::BLACK as i32 {
+                TIME = btime as i64;
+            }
+            
+        }
+
+        let winc = match time_controls[5].parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for winc: {}", e),
+        };
+
+        unsafe {
+            if SIDE == PieceColor::WHITE as i32 {
+                INC = winc as i64;
+            }
+            
+        }
+
+        let binc = match time_controls[7].parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for binc: {}", e),
+        };
+
+        unsafe {
+            if SIDE == PieceColor::BLACK as i32 {
+                INC = binc as i64;
+            }
+            
+        }
+
 
     }
+
+    if command.chars().skip(3).take(9).collect::<Vec<char>>().iter().collect::<String>() == "movestogo" {
+        let movestogo = command.chars().skip(12).collect::<Vec<char>>().iter().collect::<String>();
+
+        let movestogo = match movestogo.parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for movestogo: {}", e),
+        };
+
+        unsafe {
+            MOVESTOGO = movestogo as u64;
+        }
+    }
+
+    if command.chars().skip(3).take(8).collect::<Vec<char>>().iter().collect::<String>() == "movetime" {
+        let movetime= command.chars().skip(11).collect::<Vec<char>>().iter().collect::<String>();
+
+        let movetime = match movetime.parse::<usize>() {
+            Ok(val) => val,
+            Err(e) => panic!("unknown value for movetime: {}", e),
+        };
+
+        unsafe {
+            MOVETIME = movetime as i64;
+        }
+
+    }
+
+    unsafe {
+        if MOVETIME !=-1 {
+            TIME= MOVETIME;
+            MOVESTOGO= 1;
+        }
+
+        STARTTIME = get_time_ms() as u64;
+
+        if TIME!= -1 {
+            TIMESET = 1;
+
+            TIME /= MOVESTOGO as i64;
+            TIME -= 50;
+            STOPTIME = STARTTIME + TIME as u64 + INC as u64;
+        }
+    }
+
+    if depth == -1 {
+        depth = 64;
+    }
+    unsafe {
+        println!("time:{} start:{} stop:{} depth:{} timeset:{}", TIME, STARTTIME, STOPTIME, depth, TIMESET);
+    }
+    
+    search_position(depth as usize);
+
 }
 
 fn uci_loop(char_pieces: &HashMap<char, u32>) {
@@ -3216,7 +3457,7 @@ fn main() {
 
     // print_board();
 
-    // search_position(10);
+    // parse_go("go wtime 301362 btime 315220 winc 0 binc 0".to_string())
     
 
     
