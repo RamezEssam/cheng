@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 regex = "1.10.6"
 libc = "0.2"
-winapi = { version = "0.3", features = ["wincon", "processenv", "consoleapi"] }  # For Windows
+winapi = { version = "0.3", features = ["wincon", "processenv", "consoleapi", "winbase"] }  # For Windows
