@@ -473,7 +473,6 @@ fn input_waiting() -> bool {
 
 #[cfg(windows)]
 fn input_waiting() -> bool {
-    use std::os::windows::io::AsRawHandle;
     use winapi::um::consoleapi::GetNumberOfConsoleInputEvents;
     use winapi::um::processenv::GetStdHandle;
     use winapi::um::winbase::STD_INPUT_HANDLE;
