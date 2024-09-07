@@ -2781,8 +2781,6 @@ fn search_position(depth: usize) {
     let mut alpha = -50000;
     let mut beta = 50000;
 
-    
-
     // iterative deepening 
     for current_depth in 1..=depth {
         unsafe {
@@ -2798,18 +2796,6 @@ fn search_position(depth: usize) {
         }
 
         let score = negamax(alpha, beta, current_depth);
-
-        
-        // // we fell outside the window, so try again with a full-width window (and the same depth)
-        // if (score <= alpha) || (score >= beta) {
-        //     alpha = -50000;
-        //     beta = 50000;
-        //     continue;
-        // }
-
-        // // set up the window for the next iteration
-        // alpha -= 50;
-        // beta += 50;
 
         unsafe {
 
@@ -3036,13 +3022,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
         if STOPPED == 1 {
-            if score >= beta {
-                return beta;
-            }
-
-            if score > alpha {
-                return score;
-            }
+            return 0;
         }
 
         // fail-hard beta cutoff
@@ -3055,10 +3035,6 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         if score > alpha {
             alpha = score;
         }
-
-        
-
-
     }
     return alpha;
     }
@@ -3203,12 +3179,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
                 if STOPPED == 1 {
-                    if score >= beta {
-                        return beta;
-                    }
-                    if score > alpha {
-                        return score;
-                    }
+                    return 0;
                 }
                 
 
@@ -3276,8 +3247,6 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 BEST_MOVE = best_sofar;
 
             }
-
-            
 
             return alpha;
         }
