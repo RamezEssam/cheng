@@ -2783,11 +2783,11 @@ fn search_position(depth: usize) {
 
     // iterative deepening 
     for current_depth in 1..=depth {
-        unsafe {
-            if STOPPED == 1 {
-                break;
-            }
-        }
+        // unsafe {
+        //     if STOPPED == 1 {
+        //         break;
+        //     }
+        // }
         // find best move within a given position
 
         // enable follow pv flag
@@ -2976,9 +2976,9 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     unsafe{
     // every 2047 nodes
-    if (NODES & 2047) == 0{
-        communicate();
-    }
+    // if (NODES & 2047) == 0{
+    //     communicate();
+    // }
     // increment nodes count
     NODES += 1;
 
@@ -3021,9 +3021,9 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-        if STOPPED == 1 {
-            return 0;
-        }
+        // if STOPPED == 1 {
+        //     return 0;
+        // }
 
         // fail-hard beta cutoff
         if score >= beta {
@@ -3045,10 +3045,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 // negamax alpha beta search
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
     unsafe {
-        // every 2047 nodes
-        if (NODES & 2047) == 0{
-            communicate();
-        }
+        // // every 2047 nodes
+        // if (NODES & 2047) == 0{
+        //     communicate();
+        // }
 
         // define find PV node variable
         let mut found_pv = false;
@@ -3178,9 +3178,9 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-                if STOPPED == 1 {
-                    return 0;
-                }
+                // if STOPPED == 1 {
+                //     return 0;
+                // }
                 
 
                 moves_searched += 1;
@@ -3393,7 +3393,7 @@ fn parse_go(command: String) {
     }
 
     if depth == -1 {
-        depth = 64;
+        depth = 9;
     }
     unsafe {
         println!("time:{} start:{} stop:{} depth:{} timeset:{}", TIME, STARTTIME, STOPTIME, depth, TIMESET);
