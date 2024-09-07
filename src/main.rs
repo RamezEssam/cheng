@@ -3037,7 +3037,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
         if STOPPED == 1 {
             return alpha;
         }
-        
+
         // fail-hard beta cutoff
         if score >= beta {
             // node (move) fails high
@@ -3361,7 +3361,7 @@ fn parse_go(command: String) {
     }
 
     if command.chars().skip(3).take(9).collect::<Vec<char>>().iter().collect::<String>() == "movestogo" {
-        let movestogo = command.chars().skip(12).collect::<Vec<char>>().iter().collect::<String>();
+        let movestogo = command.chars().skip(13).collect::<Vec<char>>().iter().collect::<String>();
 
         let movestogo = match movestogo.parse::<usize>() {
             Ok(val) => val,
@@ -3374,7 +3374,7 @@ fn parse_go(command: String) {
     }
 
     if command.chars().skip(3).take(8).collect::<Vec<char>>().iter().collect::<String>() == "movetime" {
-        let movetime= command.chars().skip(11).collect::<Vec<char>>().iter().collect::<String>();
+        let movetime= command.chars().skip(12).collect::<Vec<char>>().iter().collect::<String>();
 
         let movetime = match movetime.parse::<usize>() {
             Ok(val) => val,
