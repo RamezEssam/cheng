@@ -3005,9 +3005,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     //sort_moves(&mut legal_moves);
 
-    if STOPPED == 1 {
-        return evaluate();
-    }
+    
 
     for mv in legal_moves.iter() {
         // preserve board state
@@ -3027,7 +3025,9 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
-        
+        if STOPPED == 1 {
+            return evaluate();
+        }
 
         // fail-hard beta cutoff
         if score >= beta {
@@ -3128,9 +3128,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
             let mut moves_searched = 0;
 
-            if STOPPED == 1 {
-                return evaluate();
-            }
+            
 
 
             for mv in legal_moves.iter() {
@@ -3187,7 +3185,9 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
 
                 
-                
+                if STOPPED == 1 {
+                    return evaluate();
+                }
 
                 moves_searched += 1;
 
