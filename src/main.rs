@@ -1,7 +1,7 @@
 use core::time;
 use std::collections::HashMap;
-use std::i32;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{i32, thread};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
 
@@ -103,8 +103,10 @@ static mut PLY: usize = 0;
 static mut BEST_MOVE: u64 = 0; 
 
 // NODES searched in a given position
-
 static mut NODES: usize = 0;
+
+// HASH KEY of the posiiton
+static mut HASH_KEY: u64 = 0;
 
 
 // FEN dedug positions
@@ -326,6 +328,192 @@ static mut STOPTIME: u64 = 0;
 static mut TIMESET: u64 = 0;
 // variable to flag when the time is up
 static mut STOPPED: u64 = 0;
+
+/**********************************\
+ ==================================
+ 
+        Transposition Table
+ 
+ ==================================
+\**********************************/
+
+// random piece keys [piece][square]
+static mut PIECE_KEYS: [[u64; 64]; 12] = [[0; 64]; 12];
+
+// random enpassant keys [square]
+static mut ENPASSANT_KEYS: [u64; 64] = [0; 64];
+
+// random castling keys
+static mut CASTLE_KEYS: [u64; 16] = [0; 16];
+
+// random side key
+static mut SIDE_KEY: u64 = 0;
+
+
+fn init_random_keys() {
+
+    // loop over piece codes
+    for piece in Piece::P as usize..=Piece::k as usize {
+        // loop over board squares
+        for square in 0 as usize..64 as usize {
+            unsafe {
+                PIECE_KEYS[piece][square] = get_random_u64_number();
+            }
+        }
+    }
+
+    // loop over board squares
+    for square in 0 as usize..64 as usize {
+        unsafe {
+            ENPASSANT_KEYS[square] = get_random_u64_number();
+        }
+    }
+
+    // loop over castling keys
+    for index in 0 as usize..16 as usize {
+        unsafe {
+            CASTLE_KEYS[index] = get_random_u64_number();
+        }
+    }
+
+    // init random side key
+    unsafe {
+        SIDE_KEY = get_random_u64_number();
+    }
+}
+
+
+// generate "almost" unique position ID aka hash key from scratch
+fn generate_hash_key() -> u64 {
+    unsafe {
+        // final hash key
+        let mut final_key: u64 = 0;
+
+        let mut bitboard: u64 = 0;
+
+        // loop over piece bitboards
+        for piece in Piece::P as usize ..= Piece::k as usize {
+
+            bitboard = PIECE_BITBOARDS[piece];
+
+            while bitboard  != 0 {
+                let square = match index_lsb(bitboard) {
+                    Ok(val) => val,
+                    Err(e) => panic!("invalid bitboard: {:?}", e),
+                };
+
+                final_key ^= PIECE_KEYS[piece][square];
+
+                reset_bit!(bitboard, square);
+            }
+
+        }
+
+        if ENPASSANT != BoardSquare::no_sq as u32 {
+            final_key ^= ENPASSANT_KEYS[ENPASSANT as usize];
+        }
+        // hash castling rights
+        final_key ^= CASTLE_KEYS[CASTLE as usize];
+
+        // hash the side only if black is to move
+        if SIDE == PieceColor::BLACK as i32 {
+            final_key ^= SIDE_KEY;
+        }
+
+        final_key
+    }
+}
+
+// hash table size
+static HASH_SIZE: u64 = 0x400000;
+
+// no hash entry found constant
+static NO_HASH_ENTRY: i32 = 100000;
+
+// transposition table hash flags
+static HASH_FLAG_EXACT: u64 = 0;
+static HASH_FLAG_ALPHA: u64 = 1;
+static HASH_FLAG_BETA: u64 = 2;
+
+// transposition table data structure
+#[derive(Default)]
+#[derive(Copy, Clone)]
+struct TTEntry {
+    hash_key: u64,
+    depth: u64,
+    flag: u64,
+    score: i32,
+}
+
+
+
+
+// read hash entry data
+fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>) -> Option<i32> {
+    unsafe {
+        let hash_entry: &TTEntry = match ht.get(&HASH_KEY) {
+            Some(entry) => entry,
+            None => {return None;}
+        };
+        // make sure we're dealing with the exact position we need
+        if hash_entry.hash_key == HASH_KEY {
+            if hash_entry.depth == depth {
+                // extract stored score from TT entry
+                let mut score = hash_entry.score;
+                // retrieve score independent from the actual path
+                // from root node (position) to current node (position)
+                if score < -48000 {
+                    score += PLY as i32;
+                }
+                if score > 48000 {
+                    score -= PLY as i32
+                }
+                // match the exact (PV node) score 
+                if hash_entry.flag  == HASH_FLAG_EXACT {
+                    return Some(score);
+                }
+
+                // match alpha (fail-low node) score
+                if hash_entry.flag == HASH_FLAG_ALPHA && hash_entry.score <= alpha {
+                    return Some(alpha);
+                }
+
+                // match beta (fail-high node) score
+                if hash_entry.flag == HASH_FLAG_BETA && hash_entry.score >= beta {
+                    return Some(beta);
+                }
+            }
+            
+        }
+
+        return None;
+    }
+}
+
+
+// write hash entry data
+fn write_hash_entry(mut score: i32, depth: u64, hash_flag: u64, ht: &mut HashMap<u64, TTEntry>) {
+    unsafe {
+
+        // store score independent from the actual path
+        // from root node (position) to current node (position)
+        if score < -48000 {
+            score -= PLY as i32;
+        }
+        if score > 48000 {
+            score += PLY as i32;
+        }
+        
+        // write hash entry data 
+        ht.insert(HASH_KEY, TTEntry { 
+            hash_key: HASH_KEY,
+            depth,
+            flag: hash_flag,
+            score }
+        );
+    }
+}
+
 
 
 
@@ -1030,30 +1218,34 @@ fn print_board() {
             print!(" -\n");
         }
 
+        println!("\n     HASH: {:x}", HASH_KEY);
+
         
     }
     
 }
 
-fn copy_board() -> ([u64; 12], [u64; 3], i32, u32, u32) {
+fn copy_board() -> ([u64; 12], [u64; 3], i32, u32, u32, u64) {
     unsafe {
         let piece_bitboards_copy = PIECE_BITBOARDS;
         let occupancy_copy = OCCUPANCIES;
         let side_copy = SIDE;
         let enpassant_copy = ENPASSANT;
         let castle_copy = CASTLE;
+        let hash_key_copy = HASH_KEY;
 
-        return (piece_bitboards_copy, occupancy_copy, side_copy, enpassant_copy, castle_copy)
+        return (piece_bitboards_copy, occupancy_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy)
     }
 }
 
-fn take_back(piece_bitboards_copy: [u64; 12], occupancy_copy: [u64; 3], side_copy: i32, enpassant_copy: u32, castle_copy: u32) {
+fn take_back(piece_bitboards_copy: [u64; 12], occupancy_copy: [u64; 3], side_copy: i32, enpassant_copy: u32, castle_copy: u32, hash_key_copy: u64) {
     unsafe {
         PIECE_BITBOARDS = piece_bitboards_copy;
         OCCUPANCIES = occupancy_copy;
         SIDE =side_copy;
         ENPASSANT = enpassant_copy;
         CASTLE = castle_copy;
+        HASH_KEY = hash_key_copy;
     }
 }
 
@@ -1143,6 +1335,10 @@ fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
 
         OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::WHITE as usize];
         OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::BLACK as usize];
+
+        // init the position hash key
+
+        HASH_KEY = generate_hash_key();
     }
 }
 
@@ -2279,6 +2475,10 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             reset_bit!(PIECE_BITBOARDS[piece as usize], source_square);
             set_bit!(PIECE_BITBOARDS[piece as usize], target_square);
 
+            // hash piece
+            HASH_KEY ^= PIECE_KEYS[piece as usize][source_square as usize]; // remove piece form source square 
+            HASH_KEY ^= PIECE_KEYS[piece as usize][target_square as usize]; // set piece on target square
+ 
             // Handling capture moves
             if capture != 0 {
                 let mut start_piece:usize = 0;
@@ -2297,6 +2497,8 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                     if get_bit!(PIECE_BITBOARDS[bb_piece], target_square) != 0 {
                         // remove it from corresponding bitboard
                         reset_bit!(PIECE_BITBOARDS[bb_piece], target_square);
+                        // remove piece from hash key
+                        HASH_KEY ^= PIECE_KEYS[bb_piece][target_square as usize];
                         break;
                     }
                 } 
@@ -2305,10 +2507,16 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
             if promoted != 0 {
                 if SIDE == PieceColor::WHITE as i32 {
                     reset_bit!(PIECE_BITBOARDS[Piece::P as usize], target_square);
+                    // update hash key
+                    HASH_KEY ^= PIECE_KEYS[Piece::P as usize][target_square as usize];
                 }else{
                     reset_bit!(PIECE_BITBOARDS[Piece::p as usize], target_square);
+                    // update hash key
+                    HASH_KEY ^= PIECE_KEYS[Piece::p as usize][target_square as usize];
                 }
                 set_bit!(PIECE_BITBOARDS[promoted as usize], target_square);
+                // update hash key
+                HASH_KEY ^= PIECE_KEYS[promoted as usize][target_square as usize];
                 
             }
 
@@ -2317,10 +2525,21 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                 // erase the pawn depending on side to move
                 if SIDE == PieceColor::WHITE as i32 {
                     reset_bit!(PIECE_BITBOARDS[Piece::p as usize], target_square-8);
+                    // remove pawn from hash key
+                    HASH_KEY ^= PIECE_KEYS[Piece::p as usize][(target_square-8) as usize];
+
                 }else {
                     reset_bit!(PIECE_BITBOARDS[Piece::P as usize], target_square+8);
+                    // remove pawn from hash key
+                    HASH_KEY ^= PIECE_KEYS[Piece::P as usize][(target_square+8) as usize];
                 }
             }
+
+            // remove hash enpassant
+            if ENPASSANT != BoardSquare::no_sq as u32 {
+                HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
+            }
+             
 
             // Reset enpassant square
             ENPASSANT = BoardSquare::no_sq as u32;
@@ -2331,8 +2550,13 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                 // set enpassant aquare depending on side to move
                 if SIDE == PieceColor::WHITE as i32 {
                     ENPASSANT = target_square as u32 - 8 ;
+                    // hash enpassant square
+                    HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
+
                 }else {
                     ENPASSANT = target_square as u32 + 8 ;
+                    // hash enpassant square
+                    HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
                 }
             }
 
@@ -2345,6 +2569,10 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                         // move H rook
                         reset_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::h1);
                         set_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::f1);
+
+                        // update hash key
+                        HASH_KEY ^= PIECE_KEYS[Piece::R as usize][BoardSquare::h1 as usize];
+                        HASH_KEY ^= PIECE_KEYS[Piece::R as usize][BoardSquare::f1 as usize];
                     },
 
                     // white castles queen side
@@ -2353,6 +2581,10 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                         // move A rook
                         reset_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::a1);
                         set_bit!(PIECE_BITBOARDS[Piece::R as usize], BoardSquare::d1);
+
+                        // update hash key
+                        HASH_KEY ^= PIECE_KEYS[Piece::R as usize][BoardSquare::a1 as usize];
+                        HASH_KEY ^= PIECE_KEYS[Piece::R as usize][BoardSquare::d1 as usize];
                     },
 
                     // black castles king side
@@ -2361,6 +2593,10 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                         // move H rook
                         reset_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::h8);
                         set_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::f8);
+
+                        // update hash key
+                        HASH_KEY ^= PIECE_KEYS[Piece::r as usize][BoardSquare::h8 as usize];
+                        HASH_KEY ^= PIECE_KEYS[Piece::r as usize][BoardSquare::f8 as usize];
                     },
 
                     // black castles queen side
@@ -2369,6 +2605,10 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                         // move A rook
                         reset_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::a8);
                         set_bit!(PIECE_BITBOARDS[Piece::r as usize], BoardSquare::d8);
+
+                        // update hash key
+                        HASH_KEY ^= PIECE_KEYS[Piece::r as usize][BoardSquare::a8 as usize];
+                        HASH_KEY ^= PIECE_KEYS[Piece::r as usize][BoardSquare::d8 as usize];
                     },
 
                     _ => {}
@@ -2376,9 +2616,17 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                 
             }
 
+            // hash castling rights before updates
+            HASH_KEY ^= CASTLE_KEYS[CASTLE as usize];
+
             // update castling rights
             CASTLE &=  CASTLING_RIGHTS[source_square as usize];
             CASTLE &=  CASTLING_RIGHTS[target_square as usize];
+
+            // hash castling rights after updates
+            HASH_KEY ^= CASTLE_KEYS[CASTLE as usize];
+
+        
 
             // reset occupancies
             OCCUPANCIES = [0; 3];
@@ -2401,6 +2649,9 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
 
             // change side
             SIDE ^= 1;
+
+            // Hash side
+            HASH_KEY ^= SIDE_KEY;
 
             return true;
 
@@ -2434,7 +2685,7 @@ fn perft_driver(depth: u64, root: bool) -> usize {
             cnt = 1;
             nodes += 1
         }else {
-            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
             make_move(mv, MOVE_TYPE::all_moves);
             if leaf {
                 
@@ -2446,7 +2697,7 @@ fn perft_driver(depth: u64, root: bool) -> usize {
 
             nodes += cnt;
             
-            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
         }
 
         if root {
@@ -2766,7 +3017,7 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
     }
 }
 
-fn search_position(depth: usize) {
+fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
 
     // clear helper data structures for search
     unsafe {
@@ -2779,6 +3030,7 @@ fn search_position(depth: usize) {
         SCORE_PV = 0;
         STOPPED = 0;
     }
+
     // define initial alpha beta bounds
     let mut alpha = -50000;
     let mut beta = 50000;
@@ -2787,6 +3039,7 @@ fn search_position(depth: usize) {
 
     // iterative deepening 
     for current_depth in 1..=depth {
+        
         unsafe {
             if STOPPED == 1 {
                 break;
@@ -2799,7 +3052,7 @@ fn search_position(depth: usize) {
             FOLLOW_PV = 1;
         }
 
-        score = negamax(alpha, beta, current_depth);
+        score = negamax(alpha, beta, current_depth, ht);
 
         if (score <= alpha) || (score >= beta) {
             alpha = -50000;
@@ -2996,6 +3249,10 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     // increment nodes count
     NODES += 1;
 
+    if PLY > 63 {
+        return evaluate();
+    }
+
     // evaluate position
     let evaluation = evaluate();
 
@@ -3017,7 +3274,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     
     for mv in legal_moves.iter() {
         // preserve board state
-        let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+        let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
 
         // increment ply
         PLY += 1;
@@ -3031,21 +3288,22 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         PLY-= 1;
 
-        take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+        take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
         if STOPPED == 1 {
             return 0;
         }
 
-        // fail-hard beta cutoff
-        if score >= beta {
-            // node (move) fails high
-            return beta;
-        }
+        
 
         // found a better move
         if score > alpha {
             alpha = score;
+            // fail-hard beta cutoff
+            if score >= beta {
+                // node (move) fails high
+                return beta;
+        }
         }
     }
     return alpha;
@@ -3055,8 +3313,23 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
 
 // negamax alpha beta search
-fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
+fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TTEntry>) -> i32 {
     unsafe {
+        // define score
+        let mut score = 0;
+
+        // define hash flag
+        let mut hash_flag= HASH_FLAG_ALPHA;
+
+        // read hash entry
+        // if the move has already been searched (hence has a value)
+        // we just return the score for this move without searching it
+        if let Some(score) = read_hash_entry(alpha, beta, depth as u64, ht) {
+            if PLY != 0 {
+                return score;
+            }   
+        }
+
         // // every 2047 nodes
         if (NODES % 2047) == 0 {
             communicate();
@@ -3101,15 +3374,28 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
         // null move pruning
         if depth >= 3 && !in_check && PLY != 0 {
-            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
+            // increment ply
+            PLY += 1;
 
-            SIDE ^= 1;
+            // hash enpassant if avaialble 
+            if ENPASSANT != BoardSquare::no_sq as u32 {
+                HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
+            }
 
             ENPASSANT = BoardSquare::no_sq as u32;
+            
+            SIDE ^= 1;
 
-            let score = -negamax(-beta, -beta+1, depth-1-2);
+            // hash side
+            HASH_KEY ^= SIDE_KEY;   
 
-            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+            score = -negamax(-beta, -beta+1, depth-1-2, ht);
+
+            // decrement ply
+            PLY -= 1;
+
+            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
             if STOPPED == 1 {
                 return 0;
@@ -3135,18 +3421,16 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
 
         for mv in legal_moves.iter() {
-            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy) = copy_board();
+            let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
 
             PLY += 1;
 
             make_move(*mv, MOVE_TYPE::all_moves);
 
-            let mut score = 0;
-
             // full depth search
             if moves_searched == 0 {
 
-                score = -negamax(-beta, -alpha, depth - 1);
+                score = -negamax(-beta, -alpha, depth - 1, ht);
                     
             }else{
                 // late move reduction (LMR)
@@ -3157,7 +3441,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 && get_move_capture!(*mv) == 0 
                 && get_move_promoted!(*mv) == 0 
                 {
-                    score = -negamax(-alpha - 1, -alpha, depth - 2);
+                    score = -negamax(-alpha - 1, -alpha, depth - 2, ht);
 
                 }else{
                     // hack to ensure that full-depth search is done
@@ -3170,7 +3454,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                     // the rest of the moves are searched with the goal of proving that they are all bad.
                     // It's possible to do this a bit faster than a search that worries that one
                     // of the remaining moves might be good. */
-                    score = -negamax(-alpha - 1, -alpha, depth-1);
+                    score = -negamax(-alpha - 1, -alpha, depth-1, ht);
 
                     // /* If the algorithm finds out that it was wrong, and that one of the
                     // subsequent moves was better than the first PV move, it has to search again,
@@ -3178,7 +3462,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                     // but generally not often enough to counteract the savings gained from doing the
                     // "bad move proof" search referred to earlier. */
                     if score > alpha && score < beta {
-                        score = -negamax(-beta, -alpha, depth-1);
+                        score = -negamax(-beta, -alpha, depth-1, ht);
                     }
                 }
                     
@@ -3186,7 +3470,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
 
             PLY -=1;
 
-            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy);
+            take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
             if STOPPED == 1 {
                 return 0;
@@ -3194,21 +3478,13 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 
             moves_searched += 1;
 
-            // fail-hard beta cutoff
-            if score >= beta {
-                // on quiet moves
-                if get_move_capture!(*mv) == 0 {
-                    // store killer moves
-                    KILLER_MOVES[1][PLY] = KILLER_MOVES[0][PLY];
-                    KILLER_MOVES[0][PLY] = *mv as usize;
-                } 
-
-                    
-                return beta;
-            }
 
             // found a better move
             if score > alpha {
+                // switch hash flag from storing score for fail-low node
+                // to the one storing score for PV node
+                hash_flag = HASH_FLAG_EXACT;
+
                 // on quiet moves
                 if get_move_capture!(*mv) == 0 {
                     // store history moves
@@ -3233,6 +3509,21 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 // adjust PV length
                 PV_LENGTH[PLY] = PV_LENGTH[PLY+1];
 
+                // fail-hard beta cutoff
+                if score >= beta {
+                    // store hash entry with the score equal to beta
+                    write_hash_entry(beta, depth as u64, HASH_FLAG_BETA, ht);
+                    // on quiet moves
+                    if get_move_capture!(*mv) == 0 {
+                        // store killer moves
+                        KILLER_MOVES[1][PLY] = KILLER_MOVES[0][PLY];
+                        KILLER_MOVES[0][PLY] = *mv as usize;
+                    } 
+
+                    
+                    return beta;
+                }
+
             }
 
                 
@@ -3246,13 +3537,14 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize) -> i32 {
                 return 0;
             }
         }
-
+        // store hash entry with the score equal to alpha
+        write_hash_entry(alpha, depth as u64, hash_flag, ht);
         return alpha;
     }
 }
 
 // parse UCI "go" command
-fn parse_go(command: String) {
+fn parse_go(command: String, ht: &mut HashMap<u64, TTEntry>) {
 
     unsafe {
         QUIT = 0;
@@ -3397,11 +3689,11 @@ fn parse_go(command: String) {
         println!("time:{} start:{} stop:{} depth:{} timeset:{}", TIME, STARTTIME, STOPTIME, depth, TIMESET);
     }
     
-    search_position(depth as usize);
+    search_position(depth as usize, ht);
 
 }
 
-fn uci_loop(char_pieces: &HashMap<char, u32>) {
+fn uci_loop(char_pieces: &HashMap<char, u32>, ht: &mut HashMap<u64, TTEntry>) {
     println!("id name cheng");
     println!("id author Ramez Essam");
     println!("uciok");
@@ -3420,7 +3712,7 @@ fn uci_loop(char_pieces: &HashMap<char, u32>) {
         }else if input.chars().take(10).collect::<Vec<char>>().iter().collect::<String>() == "ucinewgame" {
             parse_position("position startpos".to_string(), char_pieces);
         }else if input.chars().take(2).collect::<Vec<char>>().iter().collect::<String>() == "go" {
-            parse_go(input.clone());
+            parse_go(input.clone(), ht);
         }else if input.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "quit" {
             break;
         }else if input.chars().take(3).collect::<Vec<char>>().iter().collect::<String>() == "uci" {
@@ -3440,18 +3732,45 @@ fn uci_loop(char_pieces: &HashMap<char, u32>) {
 }
 
 
+fn init_all(char_pieces: &mut HashMap<char, u32>, ht: &mut HashMap<u64, TTEntry>) {
+    init_char_pieces(char_pieces);
+    init_leaper_table();
+    init_sliders_table(1);
+    init_sliders_table(0);
+    init_random_keys();
+}
+
+
 
 fn main() {
 
     let mut char_pieces: HashMap<char, u32> = HashMap::new();
 
-    init_char_pieces(&mut char_pieces);
+    let mut ht: HashMap<u64, TTEntry> = HashMap::with_capacity(HASH_SIZE as usize);
 
-    init_leaper_table();
+    init_all(&mut char_pieces, &mut ht);
 
-    init_sliders_table(1);
-    init_sliders_table(0);
+    let debug = false;
 
-    uci_loop(&char_pieces);
+    if debug {
+        parse_fen(START_POSTITION, &char_pieces);
+
+        print_board();
+
+        search_position(10, &mut ht);
+
+        unsafe {
+            make_move(PV_TABLE[0][0], MOVE_TYPE::all_moves);
+        }
+
+        print_board();
+
+
+        search_position(10, &mut ht);
+        
+    }else {
+        uci_loop(&char_pieces, &mut ht);
+    }
+
     
 }
