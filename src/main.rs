@@ -469,7 +469,7 @@ struct TTEntry {
 // read hash entry data
 fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>) -> Option<i32> {
     unsafe {
-        let hash_entry: &TTEntry = match ht.get(&(HASH_KEY % &HASH_SIZE)) {
+        let hash_entry: &TTEntry = match ht.get(&HASH_KEY) {
             Some(entry) => entry,
             None => {return None;}
         };
@@ -486,18 +486,19 @@ fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>
                 if score > 48000 {
                     score -= PLY as i32
                 }
+
                 // match the exact (PV node) score 
                 if hash_entry.flag  == HASH_FLAG_EXACT {
                     return Some(score);
                 }
 
                 // match alpha (fail-low node) score
-                if hash_entry.flag == HASH_FLAG_ALPHA && hash_entry.score <= alpha {
+                if (hash_entry.flag == HASH_FLAG_ALPHA) && (score <= alpha) {
                     return Some(alpha);
                 }
 
                 // match beta (fail-high node) score
-                if hash_entry.flag == HASH_FLAG_BETA && hash_entry.score >= beta {
+                if (hash_entry.flag == HASH_FLAG_BETA) && (score >= beta) {
                     return Some(beta);
                 }
             }
@@ -523,7 +524,8 @@ fn write_hash_entry(mut score: i32, depth: u64, hash_flag: u64, ht: &mut HashMap
         }
         
         // write hash entry data 
-        ht.insert(HASH_KEY % HASH_SIZE, TTEntry { 
+        ht.insert(HASH_KEY, 
+            TTEntry { 
             hash_key: HASH_KEY,
             depth,
             flag: hash_flag,
@@ -3341,9 +3343,9 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
         // read hash entry
         // if the move has already been searched (hence has a value)
         // we just return the score for this move without searching it
-        if let Some(score) = read_hash_entry(alpha, beta, depth as u64, ht) {
+        if let Some(val) = read_hash_entry(alpha, beta, depth as u64, ht) {
             if PLY != 0 {
-                return score;
+                return val;
             }   
         }
 
