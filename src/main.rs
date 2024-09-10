@@ -108,6 +108,14 @@ static mut NODES: usize = 0;
 // HASH KEY of the posiiton
 static mut HASH_KEY: u64 = 0;
 
+static MATE_VALUE: i32 = 49000;
+
+static MATE_SCORE: i32 = 48000;
+
+static INFINITY: i32 = 50000;
+
+
+
 
 // FEN dedug positions
 static EMPTY_BOARD: &str = "8/8/8/8/8/8/8/8 w - - ";
@@ -355,12 +363,12 @@ fn init_random_keys() {
     // loop over piece codes
     for piece in Piece::P as usize..=Piece::k as usize {
         // loop over board squares
-        let mut i: usize = 56;
-        let mut j: usize = 63;
+        let mut i: i32 = 56;
+        let mut j: i32 = 63;
         for _ in 0..8 {
             for square in i..=j {
                 unsafe {
-                    PIECE_KEYS[piece][square] = get_random_u64_number();
+                    PIECE_KEYS[piece][square as usize] = get_random_u64_number();
                 }
             }
             i -= 8;
@@ -369,12 +377,12 @@ fn init_random_keys() {
     }
 
     // loop over board squares
-    let mut i: usize = 56;
-    let mut j: usize = 63;
+    let mut i: i32 = 56;
+    let mut j: i32 = 63;
     for _ in 0..8 {
         for square in i..=j {
             unsafe {
-                ENPASSANT_KEYS[square] = get_random_u64_number();
+                ENPASSANT_KEYS[square as usize] = get_random_u64_number();
             }
         }
         i -= 8;
@@ -480,10 +488,10 @@ fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>
                 let mut score = hash_entry.score;
                 // retrieve score independent from the actual path
                 // from root node (position) to current node (position)
-                if score < -48000 {
+                if score < -MATE_SCORE {
                     score += PLY as i32;
                 }
-                if score > 48000 {
+                if score > MATE_SCORE {
                     score -= PLY as i32
                 }
 
@@ -516,10 +524,10 @@ fn write_hash_entry(mut score: i32, depth: u64, hash_flag: u64, ht: &mut HashMap
 
         // store score independent from the actual path
         // from root node (position) to current node (position)
-        if score < -48000 {
+        if score < -MATE_SCORE {
             score -= PLY as i32;
         }
-        if score > 48000 {
+        if score > MATE_SCORE {
             score += PLY as i32;
         }
         
@@ -3051,8 +3059,8 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
     }
 
     // define initial alpha beta bounds
-    let mut alpha = -50000;
-    let mut beta = 50000;
+    let mut alpha = -INFINITY;
+    let mut beta = INFINITY;
 
     let mut score = 0;
 
@@ -3074,8 +3082,8 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
         score = negamax(alpha, beta, current_depth, ht);
 
         if (score <= alpha) || (score >= beta) {
-            alpha = -50000;
-            beta = 50000;
+            alpha = -INFINITY;
+            beta = INFINITY;
             continue;
         }
         // set up the window for the next iteration
@@ -3553,7 +3561,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
         // detecting checkmate and stalemate
         if legal_moves.len() == 0 {
             if in_check {
-                return -49000 + PLY as i32;
+                return -MATE_VALUE + PLY as i32;
             }else {
                 return 0;
             }
