@@ -355,19 +355,37 @@ fn init_random_keys() {
     // loop over piece codes
     for piece in Piece::P as usize..=Piece::k as usize {
         // loop over board squares
-        for square in 0 as usize..64 as usize {
-            unsafe {
-                PIECE_KEYS[piece][square] = get_random_u64_number();
+        let mut i: usize = 56;
+        let mut j: usize = 63;
+        for _ in 0..8 {
+            for square in i..=j {
+                unsafe {
+                    PIECE_KEYS[piece][square] = get_random_u64_number();
+                }
             }
+            i -= 8;
+            j -= 8;
         }
     }
 
     // loop over board squares
-    for square in 0 as usize..64 as usize {
-        unsafe {
-            ENPASSANT_KEYS[square] = get_random_u64_number();
+    let mut i: usize = 56;
+    let mut j: usize = 63;
+    for _ in 0..8 {
+        for square in i..=j {
+            unsafe {
+                ENPASSANT_KEYS[square] = get_random_u64_number();
+            }
         }
+        i -= 8;
+        j -= 8;
     }
+    // for square in 0 as usize..64 as usize {
+    //     unsafe {
+            
+    //         ENPASSANT_KEYS[square] = get_random_u64_number();
+    //     }
+    // }
 
     // loop over castling keys
     for index in 0 as usize..16 as usize {
@@ -451,7 +469,7 @@ struct TTEntry {
 // read hash entry data
 fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>) -> Option<i32> {
     unsafe {
-        let hash_entry: &TTEntry = match ht.get(&HASH_KEY) {
+        let hash_entry: &TTEntry = match ht.get(&(HASH_KEY % &HASH_SIZE)) {
             Some(entry) => entry,
             None => {return None;}
         };
@@ -505,7 +523,7 @@ fn write_hash_entry(mut score: i32, depth: u64, hash_flag: u64, ht: &mut HashMap
         }
         
         // write hash entry data 
-        ht.insert(HASH_KEY, TTEntry { 
+        ht.insert(HASH_KEY % HASH_SIZE, TTEntry { 
             hash_key: HASH_KEY,
             depth,
             flag: hash_flag,
@@ -1337,7 +1355,6 @@ fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
         OCCUPANCIES[PieceColor::BOTH as usize] |= OCCUPANCIES[PieceColor::BLACK as usize];
 
         // init the position hash key
-
         HASH_KEY = generate_hash_key();
     }
 }
@@ -2551,12 +2568,12 @@ fn make_move(ch_move: u64, move_flag: MOVE_TYPE) -> bool {
                 if SIDE == PieceColor::WHITE as i32 {
                     ENPASSANT = target_square as u32 - 8 ;
                     // hash enpassant square
-                    HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
+                    HASH_KEY ^= ENPASSANT_KEYS[(target_square as u32 - 8) as usize];
 
                 }else {
                     ENPASSANT = target_square as u32 + 8 ;
                     // hash enpassant square
-                    HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
+                    HASH_KEY ^= ENPASSANT_KEYS[(target_square as u32 + 8) as usize];
                 }
             }
 
@@ -3374,6 +3391,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
 
         // null move pruning
         if depth >= 3 && !in_check && PLY != 0 {
+            // preserve board state
             let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
             // increment ply
             PLY += 1;
@@ -3395,6 +3413,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             // decrement ply
             PLY -= 1;
 
+            // take back move
             take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
             if STOPPED == 1 {
@@ -3746,7 +3765,7 @@ fn main() {
 
     let mut char_pieces: HashMap<char, u32> = HashMap::new();
 
-    let mut ht: HashMap<u64, TTEntry> = HashMap::with_capacity(HASH_SIZE as usize);
+    let mut ht: HashMap<u64, TTEntry> = HashMap::new();
 
     init_all(&mut char_pieces, &mut ht);
 
@@ -3758,14 +3777,11 @@ fn main() {
         print_board();
 
         search_position(10, &mut ht);
-
         unsafe {
             make_move(PV_TABLE[0][0], MOVE_TYPE::all_moves);
         }
-
         print_board();
-
-
+        
         search_position(10, &mut ht);
         
     }else {
