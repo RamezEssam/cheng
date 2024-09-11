@@ -1,7 +1,5 @@
-use core::time;
 use std::collections::HashMap;
-use std::{i32, thread};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
 use regex::Regex;
 
@@ -453,9 +451,6 @@ fn generate_hash_key() -> u64 {
 // hash table size
 static HASH_SIZE: u64 = 0x400000;
 
-// no hash entry found constant
-static NO_HASH_ENTRY: i32 = 100000;
-
 // transposition table hash flags
 static HASH_FLAG_EXACT: u64 = 0;
 static HASH_FLAG_ALPHA: u64 = 1;
@@ -477,41 +472,40 @@ struct TTEntry {
 // read hash entry data
 fn read_hash_entry(alpha: i32, beta: i32, depth: u64, ht: &HashMap<u64, TTEntry>) -> Option<i32> {
     unsafe {
-        let hash_entry: &TTEntry = match ht.get(&HASH_KEY) {
-            Some(entry) => entry,
-            None => {return None;}
-        };
-        // make sure we're dealing with the exact position we need
-        if hash_entry.hash_key == HASH_KEY {
-            if hash_entry.depth == depth {
-                // extract stored score from TT entry
-                let mut score = hash_entry.score;
-                // retrieve score independent from the actual path
-                // from root node (position) to current node (position)
-                if score < -MATE_SCORE {
-                    score += PLY as i32;
-                }
-                if score > MATE_SCORE {
-                    score -= PLY as i32
-                }
+        if let Some(hash_entry) = ht.get(&HASH_KEY) {
+            // make sure we're dealing with the exact position we need
+            if hash_entry.hash_key == HASH_KEY {
+                if hash_entry.depth >= depth {
+                    // extract stored score from TT entry
+                    let mut score = hash_entry.score;
+                    // retrieve score independent from the actual path
+                    // from root node (position) to current node (position)
+                    if score < -MATE_SCORE {
+                        score += PLY as i32;
+                    }
+                    if score > MATE_SCORE {
+                        score -= PLY as i32
+                    }
 
-                // match the exact (PV node) score 
-                if hash_entry.flag  == HASH_FLAG_EXACT {
-                    return Some(score);
-                }
+                    // match the exact (PV node) score 
+                    if hash_entry.flag  == HASH_FLAG_EXACT {
+                        return Some(score);
+                    }
 
-                // match alpha (fail-low node) score
-                if (hash_entry.flag == HASH_FLAG_ALPHA) && (score <= alpha) {
-                    return Some(alpha);
-                }
+                    // match alpha (fail-low node) score
+                    if (hash_entry.flag == HASH_FLAG_ALPHA) && (score <= alpha) {
+                        return Some(alpha);
+                    }
 
-                // match beta (fail-high node) score
-                if (hash_entry.flag == HASH_FLAG_BETA) && (score >= beta) {
-                    return Some(beta);
+                    // match beta (fail-high node) score
+                    if (hash_entry.flag == HASH_FLAG_BETA) && (score >= beta) {
+                        return Some(beta);
+                    }
                 }
-            }
             
+            }
         }
+        
 
         return None;
     }
@@ -3045,6 +3039,8 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
 }
 
 fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
+    // define best score variable
+    let mut score = 0;
 
     // clear helper data structures for search
     unsafe {
@@ -3061,8 +3057,6 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
     // define initial alpha beta bounds
     let mut alpha = -INFINITY;
     let mut beta = INFINITY;
-
-    let mut score = 0;
 
     // iterative deepening 
     for current_depth in 1..=depth {
@@ -3269,7 +3263,7 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
     unsafe{
     // every 2047 nodes
-    if (NODES % 2047) == 0{
+    if (NODES & 2047) == 0{
         communicate();  
     }
 
@@ -3298,6 +3292,8 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
     let mut legal_moves = generate_moves();
 
     legal_moves.sort_by_key(|&x|  std::cmp::Reverse(score_move(x)));
+
+    //sort_moves(&mut legal_moves);
     
     for mv in legal_moves.iter() {
         // preserve board state
@@ -3342,23 +3338,27 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 // negamax alpha beta search
 fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TTEntry>) -> i32 {
     unsafe {
+
         // define score
         let mut score = 0;
 
         // define hash flag
         let mut hash_flag= HASH_FLAG_ALPHA;
 
+        // let pv_node = beta - alpha > 1;
+
         // read hash entry
         // if the move has already been searched (hence has a value)
         // we just return the score for this move without searching it
         if let Some(val) = read_hash_entry(alpha, beta, depth as u64, ht) {
+            score = val;
             if PLY != 0 {
-                return val;
+                return score;
             }   
         }
 
         // // every 2047 nodes
-        if (NODES % 2047) == 0 {
+        if (NODES & 2047) == 0 {
             communicate();
         }
 
@@ -3448,6 +3448,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
 
         let mut moves_searched = 0;
 
+        //sort_moves(&mut legal_moves);
 
         for mv in legal_moves.iter() {
             let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
@@ -3491,6 +3492,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
                     // but generally not often enough to counteract the savings gained from doing the
                     // "bad move proof" search referred to earlier. */
                     if score > alpha && score < beta {
+                        
                         score = -negamax(-beta, -alpha, depth-1, ht);
                     }
                 }
@@ -3549,7 +3551,6 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
                         KILLER_MOVES[0][PLY] = *mv as usize;
                     } 
 
-                    
                     return beta;
                 }
 
@@ -3761,7 +3762,7 @@ fn uci_loop(char_pieces: &HashMap<char, u32>, ht: &mut HashMap<u64, TTEntry>) {
 }
 
 
-fn init_all(char_pieces: &mut HashMap<char, u32>, ht: &mut HashMap<u64, TTEntry>) {
+fn init_all(char_pieces: &mut HashMap<char, u32>) {
     init_char_pieces(char_pieces);
     init_leaper_table();
     init_sliders_table(1);
@@ -3777,22 +3778,18 @@ fn main() {
 
     let mut ht: HashMap<u64, TTEntry> = HashMap::new();
 
-    init_all(&mut char_pieces, &mut ht);
+    init_all(&mut char_pieces);
 
     let debug = false;
 
     if debug {
-        parse_fen(START_POSTITION, &char_pieces);
+        write_hash_entry(45, 1, HASH_FLAG_BETA, &mut ht);
 
-        print_board();
-
-        search_position(10, &mut ht);
-        unsafe {
-            make_move(PV_TABLE[0][0], MOVE_TYPE::all_moves);
+        if let Some(score) = read_hash_entry(20, 30, 1, &ht) {
+            println!("score: {}", score);
+        }else {
+            println!("Doesn't exist");
         }
-        print_board();
-        
-        search_position(10, &mut ht);
         
     }else {
         uci_loop(&char_pieces, &mut ht);
