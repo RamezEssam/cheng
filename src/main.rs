@@ -112,6 +112,12 @@ static MATE_SCORE: i32 = 48000;
 
 static INFINITY: i32 = 50000;
 
+// positions repetition table
+static mut REPETITION_TABLE: [u64; 150] = [0; 150];
+
+// repetitio index
+static mut REPETITION_INDEX: usize = 0;
+
 
 
 
@@ -3173,6 +3179,20 @@ fn score_move(mv: u64) -> usize {
     
 }
 
+fn is_repition() -> bool {
+    unsafe {
+        // loop over repetition indicies range
+        for index in 0..REPETITION_INDEX {
+            // if we find the current position 
+            if REPETITION_TABLE[index] == HASH_KEY {
+                return true;
+            }
+
+        }
+        return false;
+    }
+}
+
 
 fn enable_pv_scoring(move_list: &Vec<u64>) {
     unsafe {
@@ -3307,9 +3327,15 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         // increment ply
         PLY += 1;
+        
+        // increment repetition index & store hash key
+        REPETITION_INDEX += 1;
+        REPETITION_TABLE[REPETITION_INDEX] = HASH_KEY;
 
         if !make_move(*mv, MOVE_TYPE::only_captures) {
             PLY -= 1;
+            // decrement repetition index
+            REPETITION_INDEX -= 1;
             continue;
         }
 
@@ -3317,13 +3343,14 @@ fn quiescence(mut alpha: i32, beta: i32) -> i32 {
 
         PLY-= 1;
 
+        // decrement repetition index
+        REPETITION_INDEX -= 1;
+
         take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
         if STOPPED == 1 {
             return 0;
         }
-
-        
 
         // found a better move
         if score > alpha {
@@ -3350,6 +3377,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
 
         // define hash flag
         let mut hash_flag= HASH_FLAG_ALPHA;
+        // if position repetition occurs return draw score
+        if PLY != 0 && is_repition() {
+            return 0;
+        }
         // a hack to find out the PV node
         let pv_node = beta - alpha > 1;
 
@@ -3414,6 +3445,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             // increment ply
             PLY += 1;
 
+            // increment repetition index & store hash key
+            REPETITION_INDEX += 1;
+            REPETITION_TABLE[REPETITION_INDEX] = HASH_KEY;
+
             // hash enpassant if avaialble 
             if ENPASSANT != BoardSquare::no_sq as u32 {
                 HASH_KEY ^= ENPASSANT_KEYS[ENPASSANT as usize];
@@ -3430,6 +3465,8 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
 
             // decrement ply
             PLY -= 1;
+            // decrement repetition index
+            REPETITION_INDEX -= 1;
 
             // take back move
             take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
@@ -3462,6 +3499,10 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             let (piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy) = copy_board();
 
             PLY += 1;
+
+            // increment repetition index & store hash key
+            REPETITION_INDEX += 1;
+            REPETITION_TABLE[REPETITION_INDEX] = HASH_KEY;
 
             make_move(*mv, MOVE_TYPE::all_moves);
 
@@ -3508,6 +3549,8 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             }
 
             PLY -=1;
+
+            REPETITION_INDEX -= 1;
 
             take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
@@ -3791,19 +3834,16 @@ fn main() {
 
     let mut ht: HashMap<u64, TTEntry> = HashMap::new();
 
+    //let mut repetition_table: Vec<u64> = Vec::new();
+
     init_all(&mut char_pieces);
 
-    let debug = false;
+    let debug = true;
 
     if debug {
-        parse_fen(START_POSTITION, &char_pieces);
+        parse_fen("2r3k1/R7/8/1R6/8/8/P4KPP/8 w - - 0 40 ", &char_pieces);
         print_board();
         search_position(10, &mut ht);
-        unsafe {
-            make_move(PV_TABLE[0][0], MOVE_TYPE::all_moves);
-        }
-        
-        search_position(10, &mut ht)
         
     }else {
         uci_loop(&char_pieces, &mut ht);
