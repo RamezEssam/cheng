@@ -3362,6 +3362,11 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             communicate();
         }
 
+        // Check if PLY reached the maximum ply allowed by PV_LENGTH and PV_TABLE
+        if PLY > 63 {
+            return evaluate();
+        }
+
         // init PV length
         PV_LENGTH[PLY] = PLY as u64;
 
@@ -3370,10 +3375,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             return quiescence(alpha, beta);
         }
         
-        // Check if PLY reached the maximum ply allowed by PV_LENGTH and PV_TABLE
-        if PLY > 63 {
-            return evaluate();
-        }
+        
 
         NODES += 1;
 
