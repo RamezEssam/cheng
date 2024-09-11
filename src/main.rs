@@ -3534,13 +3534,16 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
                 PV_TABLE[PLY][PLY] = *mv;
 
                 // loop over the next ply
-                for next_ply in PLY +1 .. PV_LENGTH[PLY +1] as usize {
-                    // copy move from deeper ply into a current ply's line
-                    PV_TABLE[PLY][next_ply] = PV_TABLE[PLY+1][next_ply];
+                if PLY < 63 {
+                    for next_ply in PLY +1 .. PV_LENGTH[PLY +1] as usize {
+                        // copy move from deeper ply into a current ply's line
+                        PV_TABLE[PLY][next_ply] = PV_TABLE[PLY+1][next_ply];
+                    }
+    
+                    // adjust PV length
+                    PV_LENGTH[PLY] = PV_LENGTH[PLY+1];
                 }
-
-                // adjust PV length
-                PV_LENGTH[PLY] = PV_LENGTH[PLY+1];
+                
 
                 // fail-hard beta cutoff
                 if score >= beta {
