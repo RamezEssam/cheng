@@ -3086,7 +3086,13 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
 
         unsafe {
 
-            print!("info score cp {} depth {} nodes {} pv ", score, current_depth, NODES);
+            if score > -MATE_VALUE && score < -MATE_SCORE {
+                print!("info score mate {} depth {} nodes {} pv ", -(score + MATE_VALUE) / 2 - 1, current_depth, NODES);
+            }else if score > MATE_SCORE && score < MATE_VALUE {
+                print!("info score mate {} depth {} nodes {} pv ", (MATE_VALUE - score) / 2 + 1, current_depth, NODES);
+            }else {
+                print!("info score cp {} depth {} nodes {} pv ", score, current_depth, NODES);
+            }
 
             for i in 0..PV_LENGTH[0] as usize {
                 print!("{}", get_uci_move(PV_TABLE[0][i]));
@@ -3344,15 +3350,15 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
 
         // define hash flag
         let mut hash_flag= HASH_FLAG_ALPHA;
-
-        // let pv_node = beta - alpha > 1;
+        // a hack to find out the PV node
+        let pv_node = beta - alpha > 1;
 
         // read hash entry
         // if the move has already been searched (hence has a value)
         // we just return the score for this move without searching it
         if let Some(val) = read_hash_entry(alpha, beta, depth as u64, ht) {
             score = val;
-            if PLY != 0 {
+            if PLY != 0 && !pv_node {
                 return score;
             }   
         }
@@ -3744,8 +3750,10 @@ fn uci_loop(char_pieces: &HashMap<char, u32>, ht: &mut HashMap<u64, TTEntry>) {
             println!("readyok");
         }else if input.chars().take(8).collect::<Vec<char>>().iter().collect::<String>() == "position" {
             parse_position(input.clone(), char_pieces);
+            ht.clear();
         }else if input.chars().take(10).collect::<Vec<char>>().iter().collect::<String>() == "ucinewgame" {
             parse_position("position startpos".to_string(), char_pieces);
+            ht.clear();
         }else if input.chars().take(2).collect::<Vec<char>>().iter().collect::<String>() == "go" {
             parse_go(input.clone(), ht);
         }else if input.chars().take(4).collect::<Vec<char>>().iter().collect::<String>() == "quit" {
@@ -3788,13 +3796,14 @@ fn main() {
     let debug = false;
 
     if debug {
-        write_hash_entry(45, 1, HASH_FLAG_BETA, &mut ht);
-
-        if let Some(score) = read_hash_entry(20, 30, 1, &ht) {
-            println!("score: {}", score);
-        }else {
-            println!("Doesn't exist");
+        parse_fen(START_POSTITION, &char_pieces);
+        print_board();
+        search_position(10, &mut ht);
+        unsafe {
+            make_move(PV_TABLE[0][0], MOVE_TYPE::all_moves);
         }
+        
+        search_position(10, &mut ht)
         
     }else {
         uci_loop(&char_pieces, &mut ht);
