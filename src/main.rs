@@ -3838,7 +3838,7 @@ fn main() {
 
     init_all(&mut char_pieces);
 
-    let debug = true;
+    let debug = false;
 
     if debug {
         parse_fen("2r3k1/R7/8/1R6/8/8/P4KPP/8 w - - 0 40 ", &char_pieces);
