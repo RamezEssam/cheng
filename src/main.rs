@@ -113,7 +113,7 @@ static MATE_SCORE: i32 = 48000;
 static INFINITY: i32 = 50000;
 
 // positions repetition table
-static mut REPETITION_TABLE: [u64; 150] = [0; 150];
+static mut REPETITION_TABLE: [u64; 1000] = [0; 1000];
 
 // repetitio index
 static mut REPETITION_INDEX: usize = 0;
@@ -1285,6 +1285,9 @@ fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
         SIDE = 0;
         ENPASSANT = BoardSquare::no_sq as u32;
         CASTLE = 0;
+        HASH_KEY = 0;
+        REPETITION_INDEX = 0;
+        REPETITION_TABLE = [0; 1000];
         let mut fen_ptr = 0;
         let mut rank = 7;
         let mut file = 0;
@@ -3012,6 +3015,11 @@ fn parse_position(command: String, char_pieces: &HashMap<char, u32>) {
                     Ok(val) => val,
                     Err(_) => panic!("illegal move: {}", mv),
                 };
+                // increment repetition index
+                unsafe {
+                    REPETITION_INDEX += 1;
+                    REPETITION_TABLE[REPETITION_INDEX] = HASH_KEY;
+                }
                 make_move(ch_mv, MOVE_TYPE::all_moves);
             }
         }
@@ -3834,7 +3842,6 @@ fn main() {
 
     let mut ht: HashMap<u64, TTEntry> = HashMap::new();
 
-    //let mut repetition_table: Vec<u64> = Vec::new();
 
     init_all(&mut char_pieces);
 
