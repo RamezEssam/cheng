@@ -21,7 +21,7 @@
 1. Install Rust from [rust-lang.org](https://www.rust-lang.org/).
 2. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/cheng.git
+    git clone https://github.com/RamezEssam/cheng
     ```
 3. Navigate to the project directory:
     ```bash
