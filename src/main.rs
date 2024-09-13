@@ -4000,7 +4000,12 @@ fn parse_go(command: String, ht: &mut HashMap<u64, TTEntry>) {
             TIMESET = 1;
 
             TIME /= MOVESTOGO as i64;
-            TIME -= 50;
+            if TIME > 1500 {
+                TIME -= 50;
+            }else{
+                TIME = 50;
+            }
+            
             STOPTIME = STARTTIME + TIME as u64 + INC as u64;
         }
     }
