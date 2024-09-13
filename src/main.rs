@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{self, Write};
+use libc::FILE;
 use regex::Regex;
 
 
@@ -173,7 +174,7 @@ static KNIGHT_SCORE: [i32; 64] = [
 static  BISHOP_SCORE: [i32; 64] = [
     0,   0, -10,   0,   0, -10,   0,   0,
     0,  30,   0,   0,   0,   0,  30,   0,
-    0,  10,   0,   0,   0,   0,  10,   0,
+    0,  10,   0,   0,   0,   0,  10,   0,   
     0,   0,  10,  20,  20,  10,   0,   0,
     0,   0,  10,  20,  20,  10,   0,   0,
     0,   0,   0,  10,  10,   0,   0,   0,
@@ -277,6 +278,147 @@ static MVV_LVA: [[usize; 12]; 12] = [
 static mut KILLER_MOVES: [[usize; 64];2] = [[0; 64]; 2];
 // history moves [piece][square]
 static mut HISTORY_MOVES: [[usize; 64];12] = [[0; 64]; 12];
+
+// file masks [square]
+static mut FILE_MASKS: [u64; 64] = [0; 64];
+
+// rank masks [square]
+static mut RANK_MASKS: [u64; 64] = [0; 64];
+
+// isolated pawn masks [square]
+static mut ISOLATED_MASKS: [u64; 64] = [0; 64];
+
+// passed pawn masks [square]
+static mut WHITE_PASSED_MASKS: [u64; 64] = [0; 64];
+
+static mut BLACK_PASSED_MASKS: [u64; 64] = [0; 64];
+
+// extract rank from a square [square]
+static GET_RANK: [usize; 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7,
+];
+
+// double pawns penalty
+static DOUBLE_PAWN_PENALTY: i32 = -10;
+
+// isolated pawn penalty
+static ISOLATED_PAWN_PENALTY: i32 = -10;
+
+// passed pawn bonus
+static WHITE_PASSED_PAWN_BONUS: [i32; 8] = [0, 10, 30, 50, 75, 100, 150, 200];
+
+static BLACK_PASSED_PAWN_BONUS: [i32; 8] = [200, 150, 100, 75, 50, 30, 10, 0];
+
+//semi open file score 
+static SEMI_OPEN_FILE_SCORE: i32 = 0;
+
+static OPEN_FILE_SCORE: i32 = 0;
+
+// king safety bonus
+static KING_SHIELD_BONUS: i32 = 5;
+
+
+// set file or rank mask
+fn set_file_rank_mask(file_number: Option<i32>, rank_number: Option<i32>) -> u64 {
+    let mut mask: u64 = 0;
+
+    // loop over ranks
+    for rank in 0 as usize..8 as usize {
+        for file in 0 as usize..8 as usize {
+            let square = rank * 8 + file;
+            // on file match
+            if let Some(file_num) = file_number {
+                if file == file_num as usize {
+                    // set bit on mask
+                    set_bit!(mask, square);
+                }
+            }
+            if let Some(rank_num) = rank_number {
+                // on rank match
+                if rank == rank_num as usize {
+                    // set bit on mask
+                    set_bit!(mask, square);
+                }
+            }
+        }
+    }
+
+    mask
+}
+
+// init evaluation masks
+fn init_evaluation_masks() {
+    unsafe {
+        /******** Init file masks ********/
+        for rank in 0..8  {
+            for file in 0..8  {
+                let square = rank * 8 + file;
+                FILE_MASKS[square] |= set_file_rank_mask(Some(file as i32), None);
+            }
+        }
+
+        /******** Init rank masks ********/
+        for rank in 0.. 8 {
+            for file in 0 .. 8 {
+                let square = rank * 8 + file;
+                RANK_MASKS[square] |= set_file_rank_mask(None, Some(rank as i32));
+            }
+        }
+
+        /******** Init isolated masks ********/
+        for rank in 0 .. 8  {
+            for file in 0  .. 8  {
+                let square:i32 = rank * 8 + file;
+                ISOLATED_MASKS[square as usize] |= set_file_rank_mask(Some((file - 1) as i32), None);
+                ISOLATED_MASKS[square as usize] |= set_file_rank_mask(Some((file + 1)  as i32), None);
+            }
+        }
+
+        /******** White passed masks ********/
+        for rank in 0 .. 8 {
+            for file in 0  .. 8 {
+                let square: i32 = rank * 8 + file;
+                WHITE_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some((file - 1) as i32), None);
+                WHITE_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some(file as i32), None);
+                WHITE_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some((file + 1) as i32), None);
+
+                // loop over redudant ranks
+                for i in 0 as usize .. (rank+1) as usize {
+                    // reset redudant bits
+                    WHITE_PASSED_MASKS[square as usize] &= !RANK_MASKS[i * 8 + file as usize];
+                }
+                // for i in 0 as usize .. (8-rank) as usize {
+                //     // reset redudant bits
+                //     WHITE_PASSED_MASKS[square as usize] &= !RANK_MASKS[(7 - i) * 8 + file as usize];
+                // }
+            }
+        }
+
+        /******** Black passed masks ********/
+        for rank in 0 .. 8 {
+            for file in 0 .. 8 {
+                let square: i32 = rank * 8 + file;
+                BLACK_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some((file - 1) as i32), None);
+                BLACK_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some(file as i32), None);
+                BLACK_PASSED_MASKS[square as usize] |= set_file_rank_mask(Some((file + 1) as i32), None);
+
+                //loop over redudant ranks
+                for i in 0 as usize .. (8-rank) as usize {
+                    // reset redudant bits
+                    BLACK_PASSED_MASKS[square as usize] &= !RANK_MASKS[(7 - i) * 8 + file as usize];
+                }
+            }
+        }
+    }
+    
+}
 
 /*
       ================================
@@ -392,12 +534,6 @@ fn init_random_keys() {
         i -= 8;
         j -= 8;
     }
-    // for square in 0 as usize..64 as usize {
-    //     unsafe {
-            
-    //         ENPASSANT_KEYS[square] = get_random_u64_number();
-    //     }
-    // }
 
     // loop over castling keys
     for index in 0 as usize..16 as usize {
@@ -1316,6 +1452,8 @@ fn parse_fen(fen: &str, char_pieces: &HashMap<char, u32>) {
 
                 else if fen.chars().nth(fen_ptr).unwrap() == '/' {
                     fen_ptr += 1;
+                }else {
+                    break;
                 }
             }
             file = 0;
@@ -3230,6 +3368,8 @@ fn evaluate() -> i32 {
 
     let mut square = 0;
 
+    let mut double_pawns: i32 = 0;
+
     for bb_piece in Piece::P as usize..=Piece::k as usize {
         unsafe {
             bitboard = PIECE_BITBOARDS[bb_piece];
@@ -3248,18 +3388,109 @@ fn evaluate() -> i32 {
                 // score positional piece scores
                 match bb_piece {
                     // evaluate white pieces
-                    0 => score += PAWN_SCORE[square],
+                    0 => {
+                        score += PAWN_SCORE[square];
+                        double_pawns = count_bits(PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square]) as i32;
+                        // on double pawns (tripple, etc)
+                        if double_pawns > 1 {
+                            score += double_pawns * DOUBLE_PAWN_PENALTY;
+                        }
+                        // on isolated pawn
+                        if PIECE_BITBOARDS[Piece::P as usize] & ISOLATED_MASKS[square] == 0 {
+                            score += ISOLATED_PAWN_PENALTY;
+                        }
+                        // on passed pawn
+                        if WHITE_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::p as usize] == 0 {
+                            score += WHITE_PASSED_PAWN_BONUS[GET_RANK[square]];
+                        }
+                    },
                     1 => score += KNIGHT_SCORE[square],
-                    2 => score += BISHOP_SCORE[square],
-                    3 => score += ROOK_SCORE[square],
-                    5 => score += KING_SCORE[square],
+                    2 => {
+                        score += BISHOP_SCORE[square];
+                        // mobility
+                        score += count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                    },
+                    3 => {
+                        score += ROOK_SCORE[square];
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                            score += SEMI_OPEN_FILE_SCORE;
+                        }
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score += OPEN_FILE_SCORE;
+                        }
+                    },
+
+                    4 => {
+                        // mobility
+                        score += count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                    },
+                    5 => {
+                        score += KING_SCORE[square];
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                            score -= SEMI_OPEN_FILE_SCORE;
+                        }
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score -= OPEN_FILE_SCORE;
+                        }
+                        // king safety bonus
+                        score += count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::WHITE as usize]) as i32 * KING_SHIELD_BONUS;
+                    },
 
                     // evaluate Black pieces
-                    6 => score -= PAWN_SCORE[MIRROR_SCORE[square]],
+                    6 => {
+                        score -= PAWN_SCORE[MIRROR_SCORE[square]];
+                        double_pawns = count_bits(PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square]) as i32;
+                        // on double pawns (tripple, etc)
+                        if double_pawns > 1 {
+                            score -= double_pawns * DOUBLE_PAWN_PENALTY;
+                        }
+                        // on isolated pawn
+                        if PIECE_BITBOARDS[Piece::p as usize] & ISOLATED_MASKS[square] == 0 {
+                            score -= ISOLATED_PAWN_PENALTY;
+                        }
+                        // on passed pawn
+                        if BLACK_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::P as usize] == 0 {
+                            score -= BLACK_PASSED_PAWN_BONUS[GET_RANK[square]];
+                        }
+                    },
                     7 => score -= KNIGHT_SCORE[MIRROR_SCORE[square]],
-                    8 => score -= BISHOP_SCORE[MIRROR_SCORE[square]],
-                    9 => score -= ROOK_SCORE[MIRROR_SCORE[square]],
-                    11 => score -= KING_SCORE[MIRROR_SCORE[square]],
+                    8 => {
+                        score -= BISHOP_SCORE[MIRROR_SCORE[square]];
+                        // mobility
+                        score -= count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                    },
+                    9 =>  {
+                        score -=ROOK_SCORE[MIRROR_SCORE[square]];
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                            score -= SEMI_OPEN_FILE_SCORE;
+                        }
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score -= OPEN_FILE_SCORE;
+                        }
+                    },
+                    10 => {
+                        // mobility
+                        score -= count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                    },
+                    11 => {
+                        score -= KING_SCORE[MIRROR_SCORE[square]];
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                            score += SEMI_OPEN_FILE_SCORE;
+                        }
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score += OPEN_FILE_SCORE;
+                        }
+                        // king safety bonus
+                        score -= count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::BLACK as usize]) as i32 * KING_SHIELD_BONUS;
+                    },
 
                     _ => {},
                 }
@@ -3832,6 +4063,7 @@ fn init_all(char_pieces: &mut HashMap<char, u32>) {
     init_sliders_table(1);
     init_sliders_table(0);
     init_random_keys();
+    init_evaluation_masks()
 }
 
 
@@ -3848,9 +4080,10 @@ fn main() {
     let debug = false;
 
     if debug {
-        parse_fen("2r3k1/R7/8/1R6/8/8/P4KPP/8 w - - 0 40 ", &char_pieces);
+        parse_fen("6k1/ppppprbp/8/8/8/8/PPPPPRBP/6K1 w - - 0 1 ", &char_pieces);
         print_board();
-        search_position(10, &mut ht);
+        println!("static evaluation: {}", evaluate());
+        //search_position(10, &mut ht);
         
     }else {
         uci_loop(&char_pieces, &mut ht);
