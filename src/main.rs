@@ -4422,7 +4422,7 @@ fn main() {
 
     init_all(&mut char_pieces);
 
-    let debug = true;
+    let debug = false;
 
     if debug {
         parse_fen(START_POSTITION, &char_pieces);
