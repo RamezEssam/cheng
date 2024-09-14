@@ -307,9 +307,13 @@ static GET_RANK: [usize; 64] = [
 
 // double pawns penalty
 static DOUBLE_PAWN_PENALTY: i32 = -10;
+static DOUBLE_PAWN_PENALTY_OPENING: i32 = -5;
+static DOUBLE_PAWN_PENALTY_ENDGAME: i32 = -10;
 
 // isolated pawn penalty
 static ISOLATED_PAWN_PENALTY: i32 = -10;
+static ISOLATED_PAWN_PENALTY_OPENING: i32 = -5;
+static ISOLATED_PAWN_PENALTY_ENDGAME: i32 = -10;
 
 // passed pawn bonus
 static WHITE_PASSED_PAWN_BONUS: [i32; 8] = [0, 10, 30, 50, 75, 100, 150, 200];
@@ -317,9 +321,19 @@ static WHITE_PASSED_PAWN_BONUS: [i32; 8] = [0, 10, 30, 50, 75, 100, 150, 200];
 static BLACK_PASSED_PAWN_BONUS: [i32; 8] = [200, 150, 100, 75, 50, 30, 10, 0];
 
 //semi open file score 
-static SEMI_OPEN_FILE_SCORE: i32 = 0;
+static SEMI_OPEN_FILE_SCORE: i32 = 10;
 
-static OPEN_FILE_SCORE: i32 = 0;
+static OPEN_FILE_SCORE: i32 = 15;
+
+// mobility units (values from engine Fruit reloaded)
+static BISHOP_UNIT: i32 = 4;
+static QUEEN_UNIT: i32 = 9;
+
+// mobility bonuses (values from engine Fruit reloaded)
+static BISHOP_MOBILITY_OPENING: i32 = 5;
+static BISHOP_MOBILITY_ENDGAME: i32 = 5;
+static QUEEN_MOBILITY_OPENING: i32 = 1;
+static QUEEN_MOBILITY_ENDGAME: i32 = 2;
 
 // king safety bonus
 static KING_SHIELD_BONUS: i32 = 5;
@@ -3574,6 +3588,10 @@ fn evaluate() -> i32 {
 
     let mut score: i32 = 0;
 
+    let mut score_opening:i32 = 0;
+
+    let mut score_endgame: i32 = 0;
+
     let mut bitboard: u64 = 0;
 
     //let mut piece = 0;
@@ -3594,36 +3612,61 @@ fn evaluate() -> i32 {
                     Err(_) => panic!(),
                 };
 
-                if game_phase == GamePhase::MIDDLEGAME {
-                    score += (
-                             MATERIAL_SCORE_TP[GamePhase::OPENING as usize][bb_piece]  * game_phase_score  +
-                             MATERIAL_SCORE_TP[GamePhase::OPENING as usize][bb_piece]  * (OPENING_PHASE_SCORE - game_phase_score)
-                            )
-                             / OPENING_PHASE_SCORE ;
-                }else {
-                    score += MATERIAL_SCORE_TP[game_phase as usize][bb_piece];
-                }
+                score_opening += MATERIAL_SCORE_TP[GamePhase::OPENING as usize][bb_piece];
+                score_endgame += MATERIAL_SCORE_TP[GamePhase::ENDGAME as usize][bb_piece];
+
+                // if game_phase == GamePhase::MIDDLEGAME {
+                //     score += (
+                //              MATERIAL_SCORE_TP[GamePhase::OPENING as usize][bb_piece]  * game_phase_score  +
+                //              MATERIAL_SCORE_TP[GamePhase::OPENING as usize][bb_piece]  * (OPENING_PHASE_SCORE - game_phase_score)
+                //             )
+                //              / OPENING_PHASE_SCORE ;
+                // }else {
+                //     score += MATERIAL_SCORE_TP[game_phase as usize][bb_piece];
+                // }
                 
                 // score material weights
-                score += MATERIAL_SCORE[bb_piece];
+                // score += MATERIAL_SCORE[bb_piece];
 
                 // score positional piece scores
                 match bb_piece {
                     // evaluate white pieces
                     0 => {
-                        score += PAWN_SCORE[square];
+                        // score += PAWN_SCORE[square];
+                        // double_pawns = count_bits(PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square]) as i32;
+                        // // on double pawns (tripple, etc)
+                        // if double_pawns > 1 {
+                        //     score += double_pawns * DOUBLE_PAWN_PENALTY;
+                        // }
+                        // // on isolated pawn
+                        // if PIECE_BITBOARDS[Piece::P as usize] & ISOLATED_MASKS[square] == 0 {
+                        //     score += ISOLATED_PAWN_PENALTY;
+                        // }
+                        // // on passed pawn
+                        // if WHITE_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::p as usize] == 0 {
+                        //     score += WHITE_PASSED_PAWN_BONUS[GET_RANK[square]];
+                        // }
+
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::P as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::P as usize][square];
+
                         double_pawns = count_bits(PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square]) as i32;
-                        // on double pawns (tripple, etc)
+
                         if double_pawns > 1 {
-                            score += double_pawns * DOUBLE_PAWN_PENALTY;
+                            score_opening += (double_pawns - 1) * DOUBLE_PAWN_PENALTY_OPENING;
+                            score_endgame += (double_pawns - 1) * DOUBLE_PAWN_PENALTY_ENDGAME;
                         }
+
                         // on isolated pawn
                         if PIECE_BITBOARDS[Piece::P as usize] & ISOLATED_MASKS[square] == 0 {
-                            score += ISOLATED_PAWN_PENALTY;
+                            score_opening += ISOLATED_PAWN_PENALTY_OPENING;
+                            score_endgame += ISOLATED_PAWN_PENALTY_ENDGAME;
                         }
+
                         // on passed pawn
                         if WHITE_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::p as usize] == 0 {
-                            score += WHITE_PASSED_PAWN_BONUS[GET_RANK[square]];
+                            score_opening += WHITE_PASSED_PAWN_BONUS[GET_RANK[square]];
+                            score_endgame += WHITE_PASSED_PAWN_BONUS[GET_RANK[square]];
                         }
 
                         // if game_phase == GamePhase::MIDDLEGAME {
@@ -3636,7 +3679,8 @@ fn evaluate() -> i32 {
                         // }
                     },
                     1 => {
-                        score += KNIGHT_SCORE[square]
+                        //score += KNIGHT_SCORE[square]
+
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score += (
                         //         POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::N as usize][square] * game_phase_score +
@@ -3645,11 +3689,21 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score += POSITIONAL_SCORE[game_phase as usize][Piece::N as usize][square];
                         // }
+
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::N as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::N as usize][square];
                     },
                     2 => {
-                        score += BISHOP_SCORE[square];
+                        //score += BISHOP_SCORE[square];
                         // mobility
-                        score += count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                        //score += count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::B as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::B as usize][square];
+
+                        // mobility
+                        score_opening += count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * BISHOP_MOBILITY_OPENING;
+                        score_endgame += count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * BISHOP_MOBILITY_ENDGAME;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score += (
@@ -3661,15 +3715,15 @@ fn evaluate() -> i32 {
                         // }
                     },
                     3 => {
-                        score += ROOK_SCORE[square];
-                        // semi open file
-                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
-                            score += SEMI_OPEN_FILE_SCORE;
-                        }
-                        // open file
-                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
-                            score += OPEN_FILE_SCORE;
-                        }
+                        // score += ROOK_SCORE[square];
+                        // // semi open file
+                        // if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                        //     score += SEMI_OPEN_FILE_SCORE;
+                        // }
+                        // // open file
+                        // if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                        //     score += OPEN_FILE_SCORE;
+                        // }
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score += (
@@ -3680,11 +3734,26 @@ fn evaluate() -> i32 {
                         //     score += POSITIONAL_SCORE[game_phase as usize][Piece::R as usize][square];
                         // }
 
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::R as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::R as usize][square];
+
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                            score_opening += SEMI_OPEN_FILE_SCORE;
+                            score_endgame += SEMI_OPEN_FILE_SCORE;
+                        }
+
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score_opening += OPEN_FILE_SCORE;
+                            score_endgame += OPEN_FILE_SCORE;
+                        }
+
                     },
 
                     4 => {
                         // mobility
-                        score += count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                        //score += count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score += (
@@ -3695,19 +3764,27 @@ fn evaluate() -> i32 {
                         //     score += POSITIONAL_SCORE[game_phase as usize][Piece::Q as usize][square];
                         // }
 
+
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::Q as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::Q as usize][square];
+
+                        //mobility
+                        score_opening += count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * QUEEN_MOBILITY_OPENING;
+                        score_opening += count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * QUEEN_MOBILITY_ENDGAME;
+
                     },
                     5 => {
-                        score += KING_SCORE[square];
-                        //semi open file
-                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
-                            score -= SEMI_OPEN_FILE_SCORE;
-                        }
-                        // open file
-                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
-                            score -= OPEN_FILE_SCORE;
-                        }
-                        // king safety bonus
-                        score += count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::WHITE as usize]) as i32 * KING_SHIELD_BONUS;
+                        // score += KING_SCORE[square];
+                        // //semi open file
+                        // if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                        //     score -= SEMI_OPEN_FILE_SCORE;
+                        // }
+                        // // open file
+                        // if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                        //     score -= OPEN_FILE_SCORE;
+                        // }
+                        // // king safety bonus
+                        // score += count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::WHITE as usize]) as i32 * KING_SHIELD_BONUS;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score += (
@@ -3717,24 +3794,43 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score += POSITIONAL_SCORE[game_phase as usize][Piece::K as usize][square] ;
                         // }
+
+
+                        score_opening += POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::K as usize][square];
+                        score_endgame += POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::K as usize][square];
+
+                        //semi open file
+                        if PIECE_BITBOARDS[Piece::P as usize] & FILE_MASKS[square] == 0 {
+                            score_opening -= SEMI_OPEN_FILE_SCORE;
+                            score_endgame -= SEMI_OPEN_FILE_SCORE;
+                        }
+
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score_opening -= OPEN_FILE_SCORE;
+                            score_endgame -= OPEN_FILE_SCORE;
+                        }
+                        // king safety bonus
+                        score_opening += count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::WHITE as usize]) as i32 * KING_SHIELD_BONUS;
+                        score_endgame += count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::WHITE as usize]) as i32 * KING_SHIELD_BONUS;
                     },
 
                     // evaluate Black pieces
                     6 => {
-                        score -= PAWN_SCORE[MIRROR_SCORE[square]];
-                        double_pawns = count_bits(PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square]) as i32;
-                        // on double pawns (tripple, etc)
-                        if double_pawns > 1 {
-                            score -= double_pawns * DOUBLE_PAWN_PENALTY;
-                        }
-                        // on isolated pawn
-                        if PIECE_BITBOARDS[Piece::p as usize] & ISOLATED_MASKS[square] == 0 {
-                            score -= ISOLATED_PAWN_PENALTY;
-                        }
-                        // on passed pawn
-                        if BLACK_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::P as usize] == 0 {
-                            score -= BLACK_PASSED_PAWN_BONUS[GET_RANK[square]];
-                        }
+                        // score -= PAWN_SCORE[MIRROR_SCORE[square]];
+                        // double_pawns = count_bits(PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square]) as i32;
+                        // // on double pawns (tripple, etc)
+                        // if double_pawns > 1 {
+                        //     score -= double_pawns as i32 * DOUBLE_PAWN_PENALTY;
+                        // }
+                        // // on isolated pawn
+                        // if PIECE_BITBOARDS[Piece::p as usize] & ISOLATED_MASKS[square] == 0 {
+                        //     score -= ISOLATED_PAWN_PENALTY;
+                        // }
+                        // // on passed pawn
+                        // if BLACK_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::P as usize] == 0 {
+                        //     score -= BLACK_PASSED_PAWN_BONUS[GET_RANK[square]];
+                        // }
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
@@ -3745,10 +3841,32 @@ fn evaluate() -> i32 {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::P as usize][MIRROR_SCORE[square]];
                         // }
 
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::P as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::P as usize][MIRROR_SCORE[square]];
+
+                        double_pawns = count_bits(PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square]) as i32;
+
+                        if double_pawns > 1 {
+                            score_opening -= (double_pawns - 1) * DOUBLE_PAWN_PENALTY_OPENING;
+                            score_endgame -= (double_pawns - 1) * DOUBLE_PAWN_PENALTY_ENDGAME;
+                        }
+
+                        // on isolated pawn
+                        if PIECE_BITBOARDS[Piece::p as usize] & ISOLATED_MASKS[square] == 0 {
+                            score_opening -= ISOLATED_PAWN_PENALTY_OPENING;
+                            score_endgame -= ISOLATED_PAWN_PENALTY_ENDGAME;
+                        }
+
+                        // on passed pawn
+                        if BLACK_PASSED_MASKS[square] & PIECE_BITBOARDS[Piece::P as usize] == 0 {
+                            score_opening -= BLACK_PASSED_PAWN_BONUS[GET_RANK[square]];
+                            score_endgame -= BLACK_PASSED_PAWN_BONUS[GET_RANK[square]];
+                        }
+
 
                     },
                     7 => {
-                        score -= KNIGHT_SCORE[MIRROR_SCORE[square]];
+                        //score -= KNIGHT_SCORE[MIRROR_SCORE[square]];
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
                         //         POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::N as usize][MIRROR_SCORE[square]] * game_phase_score +
@@ -3757,11 +3875,14 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::N as usize][MIRROR_SCORE[square]];
                         // }
+
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::N as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::N as usize][MIRROR_SCORE[square]];
                     },
                     8 => {
-                        score -= BISHOP_SCORE[MIRROR_SCORE[square]];
-                        // mobility
-                        score -= count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                        // score -= BISHOP_SCORE[MIRROR_SCORE[square]];
+                        // // mobility
+                        // score -= count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
@@ -3771,17 +3892,24 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::B as usize][MIRROR_SCORE[square]] ;
                         // }
+
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::B as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::B as usize][MIRROR_SCORE[square]];
+
+                        // mobility
+                        score_opening -= count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * BISHOP_MOBILITY_OPENING;
+                        score_endgame -= count_bits(get_bishop_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * BISHOP_MOBILITY_ENDGAME;
                     },
                     9 =>  {
-                        score -=ROOK_SCORE[MIRROR_SCORE[square]];
-                        // semi open file
-                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
-                            score -= SEMI_OPEN_FILE_SCORE;
-                        }
-                        // open file
-                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
-                            score -= OPEN_FILE_SCORE;
-                        }
+                        // score -=ROOK_SCORE[MIRROR_SCORE[square]];
+                        // // semi open file
+                        // if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                        //     score -= SEMI_OPEN_FILE_SCORE;
+                        // }
+                        // // open file
+                        // if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                        //     score -= OPEN_FILE_SCORE;
+                        // }
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
@@ -3791,10 +3919,25 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::R as usize][MIRROR_SCORE[square]] ;
                         // }
+
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::R as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::R as usize][MIRROR_SCORE[square]];
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                            score_opening -= SEMI_OPEN_FILE_SCORE;
+                            score_endgame -= SEMI_OPEN_FILE_SCORE;
+                        }
+
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score_opening -= OPEN_FILE_SCORE;
+                            score_endgame -= OPEN_FILE_SCORE;
+                        }
+
                     },
                     10 => {
                         // mobility
-                        score -= count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
+                        //score -= count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
@@ -3804,19 +3947,26 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::Q as usize][MIRROR_SCORE[square]];
                         // }
+
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::Q as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::Q as usize][MIRROR_SCORE[square]];
+
+                        // mobility
+                        score_opening -= count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * QUEEN_MOBILITY_OPENING;
+                        score_endgame -= count_bits(get_queen_attacks(square as u64, OCCUPANCIES[PieceColor::BOTH as usize])) as i32 * QUEEN_MOBILITY_ENDGAME;
                     },
                     11 => {
-                        score -= KING_SCORE[MIRROR_SCORE[square]];
-                        // semi open file
-                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
-                            score += SEMI_OPEN_FILE_SCORE;
-                        }
-                        // open file
-                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
-                            score += OPEN_FILE_SCORE;
-                        }
-                        // king safety bonus
-                        score -= count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::BLACK as usize]) as i32 * KING_SHIELD_BONUS;
+                        // score -= KING_SCORE[MIRROR_SCORE[square]];
+                        // // semi open file
+                        // if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                        //     score += SEMI_OPEN_FILE_SCORE;
+                        // }
+                        // // open file
+                        // if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                        //     score += OPEN_FILE_SCORE;
+                        // }
+                        // // king safety bonus
+                        // score -= count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::BLACK as usize]) as i32 * KING_SHIELD_BONUS;
 
                         // if game_phase == GamePhase::MIDDLEGAME {
                         //     score -= (
@@ -3826,6 +3976,25 @@ fn evaluate() -> i32 {
                         // }else {
                         //     score -= POSITIONAL_SCORE[game_phase as usize][Piece::K as usize][MIRROR_SCORE[square]];
                         // }
+
+                        score_opening -= POSITIONAL_SCORE[GamePhase::OPENING as usize][Piece::K as usize][MIRROR_SCORE[square]];
+                        score_endgame -= POSITIONAL_SCORE[GamePhase::ENDGAME as usize][Piece::K as usize][MIRROR_SCORE[square]];
+
+                        // semi open file
+                        if PIECE_BITBOARDS[Piece::p as usize] & FILE_MASKS[square] == 0 {
+                            score_opening += SEMI_OPEN_FILE_SCORE;
+                            score_endgame += SEMI_OPEN_FILE_SCORE;
+                        }
+
+                        // open file
+                        if (PIECE_BITBOARDS[Piece::P as usize] | PIECE_BITBOARDS[Piece::p as usize]) & FILE_MASKS[square] == 0 {
+                            score_opening += OPEN_FILE_SCORE;
+                            score_endgame += OPEN_FILE_SCORE;
+                        }
+
+                        // king safety bonus
+                        score_opening -= count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::BLACK as usize]) as i32 * KING_SHIELD_BONUS;
+                        score_endgame -= count_bits(KING_ATTACKS[square] & OCCUPANCIES[PieceColor::BLACK as usize]) as i32 * KING_SHIELD_BONUS;
                     },
 
                     _ => {},
@@ -3834,6 +4003,32 @@ fn evaluate() -> i32 {
                 reset_bit!(bitboard, square);
             }
         }
+    }
+
+    /*          
+        Now in order to calculate interpolated score
+        for a given game phase we use this formula
+        (same for material and positional scores):
+        
+        (
+          score_opening * game_phase_score + 
+          score_endgame * (opening_phase_score - game_phase_score)
+        ) / opening_phase_score
+
+        E.g. the score for pawn on d4 at phase say 5000 would be
+        interpolated_score = (12 * 5000 + (-7) * (6192 - 5000)) / 6192 = 8,342377261
+    */
+
+    // interpolate score in the middlegame
+    if game_phase == GamePhase::MIDDLEGAME {
+        score = (
+            score_opening * game_phase_score + 
+            score_endgame * (OPENING_PHASE_SCORE  - game_phase_score)
+        ) / OPENING_PHASE_SCORE
+    }else if game_phase == GamePhase::OPENING {
+        score = score_opening;
+    }else if game_phase == GamePhase::ENDGAME {
+        score = score_endgame;
     }
 
     unsafe {
@@ -4432,10 +4627,11 @@ fn main() {
     let debug = false;
 
     if debug {
-        parse_fen(START_POSTITION, &char_pieces);
+        parse_fen(TRICKY_POSITION, &char_pieces);
         print_board();
-        //println!("static evaluation: {}" , evaluate());
-        search_position(15, &mut ht);
+        println!("static evaluation: {}" , evaluate());
+        println!("game phase: {}", get_game_phase_score());
+        search_position(11, &mut ht);
         
     }else {
         uci_loop(&char_pieces, &mut ht);
