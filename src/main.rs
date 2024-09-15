@@ -4424,7 +4424,7 @@ fn main() {
 
     init_all(&mut char_pieces);
 
-    let debug = true;
+    let debug = false;
 
     if debug {
         parse_fen("rn2kb1r/p3pppp/1p2b3/3q4/R2PP3/1p3Q2/5PPP/1NB1KB1R b Kkq - 0 12", &char_pieces);
