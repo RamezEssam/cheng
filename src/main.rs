@@ -630,6 +630,8 @@ static mut PV_LENGTH: [u64; 64] = [0; 64];
 // PV table
 static mut PV_TABLE: [[u64; 64]; 64] = [[0; 64]; 64];
 
+static mut PREV_PV_TABLE: [[u64; 64]; 64] = [[0; 64]; 64];
+
 static mut FOLLOW_PV: u64 = 0;
 
 static mut SCORE_PV: u64 = 0;
@@ -664,6 +666,8 @@ static mut STOPTIME: u64 = 0;
 static mut TIMESET: u64 = 0;
 // variable to flag when the time is up
 static mut STOPPED: u64 = 0;
+// variable to flag wether a node has been searched fully or not
+static mut SEARCH_COMPLETE: bool = true;
 
 /**********************************\
  ==================================
@@ -1033,6 +1037,7 @@ fn read_input() {
 
     if input_waiting() {
         unsafe{
+            SEARCH_COMPLETE = false;
             STOPPED = 1;
         }
 
@@ -3379,6 +3384,7 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
         NODES = 0;
         KILLER_MOVES = [[0; 64]; 2];
         HISTORY_MOVES = [[0; 64]; 12];
+        
         PV_TABLE = [[0; 64]; 64];
         PV_LENGTH = [0; 64];
         FOLLOW_PV = 0;
@@ -3392,9 +3398,10 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
 
     // iterative deepening 
     for current_depth in 1..=depth {
-        
         unsafe {
+            PREV_PV_TABLE = PV_TABLE;
             if STOPPED == 1 {
+                SEARCH_COMPLETE = false;
                 break;
             }
         }
@@ -3417,6 +3424,7 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
         beta = score + 50;
 
         unsafe {
+            
             if PV_LENGTH[0] != 0 {
                 if score > -MATE_VALUE  && score < -MATE_SCORE  {
                     print!("info score mate {} depth {} nodes {} pv ", -(score + MATE_VALUE ) / 2 - 1, current_depth, NODES);
@@ -3426,32 +3434,53 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
                     print!("info score cp {} depth {} nodes {} pv ", score, current_depth, NODES);
                 }
 
-                for i in 0..PV_LENGTH[0] as usize {
-                    print!("{}", get_uci_move(PV_TABLE[0][i]));
-                    print!(" ");
+                if !SEARCH_COMPLETE  {
+                    for i in 0..PV_LENGTH[0] as usize {
+                        print!("{}", get_uci_move(PREV_PV_TABLE[0][i]));
+                        print!(" ");
+                    }
+                }else {
+                    for i in 0..PV_LENGTH[0] as usize {
+                        print!("{}", get_uci_move(PV_TABLE[0][i]));
+                        print!(" ");
+                    }
                 }
                 println!();
             }
-
         }
-
-        
     }
     
     unsafe {
-        BEST_MOVE = PV_TABLE[0][0];
-        if get_move_promoted!(BEST_MOVE) != 0 {
-            println!("bestmove {}{}{}",
-            SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
-            SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
-            ASCII_PIECES[get_move_promoted!(BEST_MOVE) as usize]
+        if SEARCH_COMPLETE {
+            BEST_MOVE = PV_TABLE[0][0];
+            if get_move_promoted!(BEST_MOVE) != 0 {
+                println!("bestmove {}{}{}",
+                SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+                SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+                ASCII_PIECES[get_move_promoted!(BEST_MOVE) as usize]
             );
+            }else {
+                println!("bestmove {}{}",
+                SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+                SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+            );
+            }
         }else {
-            println!("bestmove {}{}",
-            SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
-            SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+            BEST_MOVE = PREV_PV_TABLE[0][0];
+            if get_move_promoted!(BEST_MOVE) != 0 {
+                println!("bestmove {}{}{}",
+                SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+                SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+                ASCII_PIECES[get_move_promoted!(BEST_MOVE) as usize]
             );
+            }else {
+                println!("bestmove {}{}",
+                SQUARE_TO_COORD[get_move_source!(BEST_MOVE) as usize],
+                SQUARE_TO_COORD[get_move_target!(BEST_MOVE) as usize],
+            );
+            }
         }
+        
     }
 }
 
@@ -4043,6 +4072,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
             if STOPPED == 1 {
+                SEARCH_COMPLETE = false;
                 return 0;
             }
 
@@ -4126,6 +4156,7 @@ fn negamax(mut alpha: i32, beta: i32, mut depth: usize, ht: &mut HashMap<u64, TT
             take_back(piece_bitboards_copy, occupancies_copy, side_copy, enpassant_copy, castle_copy, hash_key_copy);
 
             if STOPPED == 1 {
+                SEARCH_COMPLETE = false;
                 return 0;
             }
                 
@@ -4209,6 +4240,7 @@ fn reset_time_control() {
         STOPTIME = 0;
         TIMESET= 0;
         STOPPED= 0;
+        SEARCH_COMPLETE = true;
     }
 }
 
