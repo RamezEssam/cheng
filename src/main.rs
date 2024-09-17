@@ -3435,7 +3435,7 @@ fn search_position(depth: usize, ht: &mut HashMap<u64, TTEntry>) {
                 }
 
                 if !SEARCH_COMPLETE  {
-                    for i in 0..PV_LENGTH[0] as usize {
+                    for i in 0..(PV_LENGTH[0] -1) as usize {
                         print!("{}", get_uci_move(PREV_PV_TABLE[0][i]));
                         print!(" ");
                     }
